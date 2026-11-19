@@ -1,0 +1,14 @@
+[package]
+name = "nine-grid-core"
+description = "九宫棋纯规则引擎：无 IO、无数据库、无链，可被服务端与链上程序共同复用。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }

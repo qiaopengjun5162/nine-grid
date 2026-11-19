@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>九宫棋 · Nine Grid</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <h1>九宫棋</h1>
+      <p class="sub">井字棋，又叫九宫棋：三个棋子横、竖、斜连成一条直线即获胜。</p>
+    </header>
+
+    <section id="lobby" class="panel hidden">
+      <button id="create-btn" class="primary" type="button">开一局新棋</button>
+      <div class="divider"><span>或者加入别人的局</span></div>
+      <form id="join-form" class="join">
+        <input id="code-input" maxlength="6" placeholder="6 位房间码" autocomplete="off"
+               spellcheck="false" inputmode="latin">
+        <button type="submit" class="ghost">加入</button>
+      </form>
+      <p class="hint">建局者执 O 先手，加入者执 X。把房间码发给对手即可。</p>
+    </section>
+
+    <section id="game" class="panel hidden">
+      <div class="room">
+        <div>
+          <span class="label">房间码</span>
+          <strong id="room-code">------</strong>
+        </div>
+        <button id="copy-btn" class="ghost small" type="button">复制邀请链接</button>
+      </div>
+
+      <div class="seats">
+        <div class="seat" id="seat-o">
+          <span class="mark o"></span>
+          <div><b>O 方</b><small id="seat-o-name">等待中</small></div>
+        </div>
+        <div class="seat" id="seat-x">
+          <span class="mark x"></span>
+          <div><b>X 方</b><small id="seat-x-name">待加入</small></div>
+        </div>
+      </div>
+
+      <p class="status" id="status">正在加载…</p>
+
+      <div class="board" id="board" role="grid" aria-label="九宫棋盘"></div>
+
+      <details class="replay">
+        <summary>棋谱 · <span id="ply-count">0</span> 手</summary>
+        <ol id="move-list"></ol>
+      </details>
+
+      <button id="new-btn" class="ghost small hidden" type="button">再来一局</button>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

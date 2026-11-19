@@ -1,0 +1,10 @@
+/target
+.env
+.DS_Store
+**/*.rs.bk
+
+# 阶段 B 的 Anchor 工程（独立 workspace，自带 .gitignore 之外的产物）
+chain/target
+chain/node_modules
+chain/.anchor
+chain/test-ledger

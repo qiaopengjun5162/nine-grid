@@ -1,0 +1,391 @@
+use nine_grid_core::{FIRST_MARK, Game, GameState, Mark};
+use rand::Rng;
+use serde::Serialize;
+use sqlx::{
+    PgConnection, PgPool, Postgres, Row,
+    postgres::{PgPoolOptions, PgRow},
+};
+use uuid::Uuid;
+
+use crate::error::AppError;
+
+/// 房间码字母表：去掉 I / L / O / 0 / 1，避免手输时看错
+const ROOM_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const ROOM_LEN: usize = 6;
+
+/// 连接数据库并把 migrations 全部应用一遍
+pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
+    let pool = PgPoolOptions::new()
+        .max_connections(8)
+        .connect(database_url)
+        .await?;
+    sqlx::migrate!("../../migrations").run(&pool).await?;
+    Ok(pool)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Seat {
+    pub id: Uuid,
+    pub handle: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Seats {
+    pub o: Option<Seat>,
+    pub x: Option<Seat>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MoveView {
+    pub ply: i16,
+    pub mark: Mark,
+    pub position: u8,
+}
+
+/// 返回给前端的完整快照。
+///
+/// 注意 `board` 是**算出来的**，不是存出来的 —— 它来自 `moves` 的重放结果。
+#[derive(Debug, Clone, Serialize)]
+pub struct GameSnapshot {
+    pub code: String,
+    pub state: GameState,
+    pub turn: Mark,
+    pub board: [Option<Mark>; 9],
+    pub plies: u8,
+    pub version: i64,
+    pub winner: Option<Mark>,
+    pub players: Seats,
+    pub moves: Vec<MoveView>,
+}
+
+impl GameSnapshot {
+    /// 某个玩家在这局里执什么子
+    pub fn mark_of(&self, player_id: Uuid) -> Option<Mark> {
+        if self
+            .players
+            .o
+            .as_ref()
+            .is_some_and(|seat| seat.id == player_id)
+        {
+            Some(Mark::O)
+        } else if self
+            .players
+            .x
+            .as_ref()
+            .is_some_and(|seat| seat.id == player_id)
+        {
+            Some(Mark::X)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GameRow {
+    id: Uuid,
+    state: GameState,
+    version: i64,
+}
+
+/// 建局：创建者执 O 先手，等待对手加入
+pub async fn create_game(
+    pool: &PgPool,
+    player_id: Uuid,
+    handle: Option<&str>,
+) -> Result<GameSnapshot, AppError> {
+    upsert_player(pool, player_id, handle).await?;
+
+    // 房间码冲突概率极低，但仍然要处理；重试 8 次仍冲突就报错
+    for _ in 0..8 {
+        let code = random_room_code();
+        let id = Uuid::new_v4();
+
+        let mut tx = pool.begin().await?;
+        let inserted = sqlx::query(
+            "insert into games (id, code, state, turn) values ($1, $2, $3, $4)
+             on conflict (code) do nothing",
+        )
+        .bind(id)
+        .bind(&code)
+        .bind(GameState::Waiting.as_str())
+        .bind(FIRST_MARK.code())
+        .execute(&mut *tx)
+        .await?;
+
+        if inserted.rows_affected() == 0 {
+            continue;
+        }
+
+        sqlx::query("insert into game_players (game_id, player_id, mark) values ($1, $2, $3)")
+            .bind(id)
+            .bind(player_id)
+            .bind(FIRST_MARK.code())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        return snapshot(pool, &code).await;
+    }
+
+    Err(AppError::Internal("房间号分配失败，请重试".to_owned()))
+}
+
+/// 加入一局正在等人的棋，加入者执 X
+pub async fn join_game(
+    pool: &PgPool,
+    code: &str,
+    player_id: Uuid,
+    handle: Option<&str>,
+) -> Result<GameSnapshot, AppError> {
+    upsert_player(pool, player_id, handle).await?;
+
+    let mut tx = pool.begin().await?;
+
+    // FOR UPDATE 就是本地版的"账户锁"：同一局的并发请求会被串行化
+    let game = lock_game(&mut tx, code).await?;
+
+    if game.state != GameState::Waiting {
+        return Err(AppError::conflict("game_full", "这一局已经有对手了"));
+    }
+    if seat_mark(&mut tx, game.id, player_id).await?.is_some() {
+        return Err(AppError::conflict(
+            "cannot_play_yourself",
+            "这是你自己建的房间，等对手来吧",
+        ));
+    }
+
+    sqlx::query("insert into game_players (game_id, player_id, mark) values ($1, $2, $3)")
+        .bind(game.id)
+        .bind(player_id)
+        .bind(Mark::X.code())
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query(
+        "update games
+            set state = $2, turn = $3, version = version + 1, updated_at = now()
+          where id = $1",
+    )
+    .bind(game.id)
+    .bind(GameState::InProgress.as_str())
+    .bind(FIRST_MARK.code())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    snapshot(pool, code).await
+}
+
+/// 落子。规则裁决全部交给 `nine_grid_core`，数据库只负责存取。
+pub async fn play(
+    pool: &PgPool,
+    code: &str,
+    player_id: Uuid,
+    position: u8,
+    expected_version: Option<i64>,
+) -> Result<GameSnapshot, AppError> {
+    let mut tx = pool.begin().await?;
+    let game_row = lock_game(&mut tx, code).await?;
+
+    if let Some(expected) = expected_version
+        && expected != game_row.version
+    {
+        return Err(AppError::conflict(
+            "stale_version",
+            "有人抢先走了一步，刷新后重试",
+        ));
+    }
+
+    let moves = load_moves(&mut *tx, game_row.id).await?;
+    let sequence: Vec<(Mark, u8)> = moves.iter().map(|m| (m.mark, m.position)).collect();
+    let started = game_row.state != GameState::Waiting;
+    let mut game = Game::replay_with(&sequence, started).map_err(AppError::from_rule)?;
+
+    let mark = seat_mark(&mut tx, game_row.id, player_id)
+        .await?
+        .ok_or_else(|| AppError::forbidden("你不是这局棋的玩家"))?;
+
+    game.apply(mark, position).map_err(AppError::from_rule)?;
+
+    let ply = i16::from(game.plies());
+    sqlx::query(
+        "insert into moves (game_id, ply, mark, position, player_id) values ($1, $2, $3, $4, $5)",
+    )
+    .bind(game_row.id)
+    .bind(ply)
+    .bind(mark.code())
+    .bind(i16::from(position))
+    .bind(player_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "update games
+            set state = $2, turn = $3, plies = $4, version = version + 1, updated_at = now()
+          where id = $1",
+    )
+    .bind(game_row.id)
+    .bind(game.state().as_str())
+    .bind(game.turn().code())
+    .bind(ply)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    snapshot(pool, code).await
+}
+
+/// 读一局的完整快照（棋盘由棋谱重放得出）
+pub async fn snapshot(pool: &PgPool, code: &str) -> Result<GameSnapshot, AppError> {
+    let row = sqlx::query("select * from games where code = $1")
+        .bind(code)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let game_row = row_to_game(&row)?;
+
+    let moves = load_moves(pool, game_row.id).await?;
+    let sequence: Vec<(Mark, u8)> = moves.iter().map(|m| (m.mark, m.position)).collect();
+    let started = game_row.state != GameState::Waiting;
+    let rules = Game::replay_with(&sequence, started)
+        .map_err(|err| AppError::Internal(format!("棋谱重放失败: {err}")))?;
+
+    if rules.state() != game_row.state {
+        tracing::warn!(
+            code,
+            db_state = %game_row.state,
+            replay_state = %rules.state(),
+            "数据库状态与棋谱重放结果不一致，以棋谱为准"
+        );
+    }
+
+    Ok(GameSnapshot {
+        code: code.to_owned(),
+        state: rules.state(),
+        turn: rules.turn(),
+        board: *rules.board().cells(),
+        plies: rules.plies(),
+        version: game_row.version,
+        winner: nine_grid_core::winner_mark(rules.state()),
+        players: load_seats(pool, game_row.id).await?,
+        moves,
+    })
+}
+
+fn random_room_code() -> String {
+    let mut rng = rand::thread_rng();
+    (0..ROOM_LEN)
+        .map(|_| char::from(ROOM_ALPHABET[rng.gen_range(0..ROOM_ALPHABET.len())]))
+        .collect()
+}
+
+async fn upsert_player(
+    pool: &PgPool,
+    player_id: Uuid,
+    handle: Option<&str>,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "insert into players (id, handle) values ($1, $2)
+         on conflict (id) do update set handle = coalesce(excluded.handle, players.handle)",
+    )
+    .bind(player_id)
+    .bind(handle)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn lock_game(tx: &mut PgConnection, code: &str) -> Result<GameRow, AppError> {
+    let row = sqlx::query("select * from games where code = $1 for update")
+        .bind(code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    row_to_game(&row)
+}
+
+async fn load_moves<'e, E>(executor: E, game_id: Uuid) -> Result<Vec<MoveView>, AppError>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    let rows = sqlx::query("select ply, mark, position from moves where game_id = $1 order by ply")
+        .bind(game_id)
+        .fetch_all(executor)
+        .await?;
+
+    rows.iter()
+        .map(|row| {
+            let mark_code: i16 = row.try_get("mark")?;
+            let position: i16 = row.try_get("position")?;
+            let mark = Mark::from_code(mark_code)
+                .ok_or_else(|| AppError::Internal(format!("非法的棋子编码 {mark_code}")))?;
+            Ok(MoveView {
+                ply: row.try_get("ply")?,
+                mark,
+                position: u8::try_from(position)
+                    .map_err(|_| AppError::Internal(format!("非法的格子编号 {position}")))?,
+            })
+        })
+        .collect()
+}
+
+async fn load_seats<'e, E>(executor: E, game_id: Uuid) -> Result<Seats, AppError>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    let rows = sqlx::query(
+        "select gp.mark, p.id, p.handle
+           from game_players gp
+           join players p on p.id = gp.player_id
+          where gp.game_id = $1",
+    )
+    .bind(game_id)
+    .fetch_all(executor)
+    .await?;
+
+    let mut seats = Seats { o: None, x: None };
+    for row in &rows {
+        let mark_code: i16 = row.try_get("mark")?;
+        let seat = Seat {
+            id: row.try_get("id")?,
+            handle: row.try_get("handle")?,
+        };
+        match Mark::from_code(mark_code) {
+            Some(Mark::O) => seats.o = Some(seat),
+            Some(Mark::X) => seats.x = Some(seat),
+            None => return Err(AppError::Internal(format!("非法的座位编码 {mark_code}"))),
+        }
+    }
+    Ok(seats)
+}
+
+async fn seat_mark(
+    tx: &mut PgConnection,
+    game_id: Uuid,
+    player_id: Uuid,
+) -> Result<Option<Mark>, AppError> {
+    let code: Option<i16> =
+        sqlx::query_scalar("select mark from game_players where game_id = $1 and player_id = $2")
+            .bind(game_id)
+            .bind(player_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    code.map(|value| {
+        Mark::from_code(value).ok_or_else(|| AppError::Internal(format!("非法的座位编码 {value}")))
+    })
+    .transpose()
+}
+
+fn row_to_game(row: &PgRow) -> Result<GameRow, AppError> {
+    let state_text: String = row.try_get("state")?;
+    let state = state_text
+        .parse::<GameState>()
+        .map_err(|_| AppError::Internal(format!("数据库里存在未知状态 {state_text}")))?;
+    Ok(GameRow {
+        id: row.try_get("id")?,
+        state,
+        version: row.try_get("version")?,
+    })
+}

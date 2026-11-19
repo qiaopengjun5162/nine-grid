@@ -17,6 +17,8 @@ const ui = {
   codeInput: document.getElementById("code-input"),
   roomCode: document.getElementById("room-code"),
   copyBtn: document.getElementById("copy-btn"),
+  botBtn: document.getElementById("bot-btn"),
+  botCreateBtn: document.getElementById("bot-create-btn"),
   seatO: document.getElementById("seat-o"),
   seatX: document.getElementById("seat-x"),
   seatOName: document.getElementById("seat-o-name"),
@@ -125,14 +127,24 @@ function render(view) {
   renderBoard(view);
   renderMoves(view);
   ui.newBtn.classList.toggle("hidden", !isOver(view.state));
+  // 只在自己是建局者、对手还没来时，才显示「让机器人加入」
+  ui.botBtn.classList.toggle("hidden", !(view.state === "waiting" && view.you === "O"));
 }
 
 function renderSeats(view) {
   const { o, x } = view.players;
-  ui.seatOName.textContent = o ? (view.you === "O" ? "你" : shortId(o.id)) : "等待中";
-  ui.seatXName.textContent = x ? (view.you === "X" ? "你" : shortId(x.id)) : "待加入";
+  ui.seatOName.textContent = seatLabel(o, view.you, "O");
+  ui.seatXName.textContent = seatLabel(x, view.you, "X");
   ui.seatO.classList.toggle("active", view.state === "in_progress" && view.turn === "O");
   ui.seatX.classList.toggle("active", view.state === "in_progress" && view.turn === "X");
+}
+
+// 座位怎么显示：自己 → 你；机器人 → 机器人；真人 → 昵称或短 id
+function seatLabel(seat, you, mark) {
+  if (!seat) return "待加入";
+  if (you === mark) return "你";
+  if (seat.is_bot) return "机器人";
+  return seat.handle || shortId(seat.id);
 }
 
 function renderStatus(view) {
@@ -140,11 +152,12 @@ function renderStatus(view) {
   let over = false;
 
   if (view.state === "waiting") {
-    text = "等对手加入。把房间码或邀请链接发给他。";
+    text = "等对手加入。把房间码或邀请链接发给他，或者让机器人陪你下。";
   } else if (view.state === "in_progress") {
+    const opponent = view.turn === "O" ? view.players.o : view.players.x;
     if (!view.you) text = "你在旁观这一局。";
     else if (view.turn === view.you) text = `轮到你落子（${view.you}）`;
-    else text = "等对手落子…";
+    else text = opponent?.is_bot ? "机器人正在落子…" : "等对手落子…";
   } else if (view.state === "draw") {
     text = "九格下满，平局。";
     over = true;
@@ -270,6 +283,45 @@ async function createGame() {
   }
 }
 
+// 建局 + 立刻让机器人落座：一个人也能开一局
+async function createBotGame() {
+  ui.botCreateBtn.disabled = true;
+  try {
+    const created = await api("/api/games", {
+      method: "POST",
+      body: { player_id: state.playerId },
+    });
+    state.room = created.code;
+    history.replaceState(null, "", `?room=${created.code}`);
+    render(created);
+    await seatBot();
+    startPolling();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    ui.botCreateBtn.disabled = false;
+  }
+}
+
+// 让机器人坐进 X 座位。之后它就是一个普通对手：
+// 你每落一子，服务端在同一个事务里走完它的应招。
+async function seatBot() {
+  if (!state.room) return;
+  ui.botBtn.disabled = true;
+  try {
+    const view = await api(`/api/games/${encodeURIComponent(state.room)}/bot`, {
+      method: "POST",
+      body: { player_id: state.playerId },
+    });
+    render(view);
+    toast("机器人执 X 入座，你先走");
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    ui.botBtn.disabled = false;
+  }
+}
+
 async function openRoom(code) {
   state.room = code;
   try {
@@ -328,6 +380,8 @@ async function boot() {
   buildBoard();
 
   ui.createBtn.addEventListener("click", createGame);
+  ui.botCreateBtn.addEventListener("click", createBotGame);
+  ui.botBtn.addEventListener("click", seatBot);
   ui.newBtn.addEventListener("click", createGame);
   ui.copyBtn.addEventListener("click", copyLink);
   ui.joinForm.addEventListener("submit", (event) => {

@@ -69,6 +69,9 @@ button:disabled { cursor: default; }
 
 .small { padding: 8px 12px; font-size: 12px; }
 
+/* 大厅里的「和机器人下一盘」跟主按钮同宽，两个入口看起来才是并列的选择 */
+#lobby #bot-create-btn { width: 100%; margin-top: 10px; }
+
 .divider {
   display: flex;
   align-items: center;

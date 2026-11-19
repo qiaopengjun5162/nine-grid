@@ -356,6 +356,16 @@ impl Game {
         Ok(())
     }
 
+    /// 试算：返回「如果 `mark` 落在 `position`」之后的新局面，原局面保持不变。
+    ///
+    /// 存在的意义是让 AI / 前端预览**不必自己复制一份规则**：
+    /// 它走的还是 [`Self::apply`] 这条唯一校验路径，所以试算结果不可能比正式落子更宽松。
+    pub fn after(&self, mark: Mark, position: u8) -> Result<Self, RuleError> {
+        let mut next = self.clone();
+        next.apply(mark, position)?;
+        Ok(next)
+    }
+
     /// 当前棋盘
     #[must_use]
     pub const fn board(&self) -> &Board {
@@ -644,6 +654,21 @@ mod tests {
     fn replay_without_start_rejects_moves() {
         let moves = [(Mark::O, 0)];
         assert_eq!(Game::replay_with(&moves, false), Err(RuleError::NotStarted));
+    }
+
+    #[test]
+    fn after_does_not_mutate_the_original() {
+        let mut game = Game::waiting();
+        game.start().unwrap();
+
+        let next = game.after(Mark::O, 4).unwrap();
+        assert_eq!(game.plies(), 0, "试算不能改动原局面");
+        assert_eq!(next.plies(), 1);
+        assert_eq!(next.board().get(4), Some(Mark::O));
+
+        // 试算同样受规则约束，非法落子照样报错
+        assert_eq!(game.after(Mark::X, 0), Err(RuleError::NotYourTurn));
+        assert_eq!(game.after(Mark::O, 9), Err(RuleError::OutOfRange));
     }
 
     #[test]

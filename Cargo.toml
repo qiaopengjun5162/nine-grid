@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/server"]
+members = ["crates/bot", "crates/core", "crates/server"]
 exclude = ["chain"]
 
 [workspace.package]
@@ -10,6 +10,7 @@ rust-version = "1.88"
 license = "MIT"
 
 [workspace.dependencies]
+nine-grid-bot = { path = "crates/bot" }
 nine-grid-core = { path = "crates/core" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 chrono = { version = "0.4", features = ["serde"] }

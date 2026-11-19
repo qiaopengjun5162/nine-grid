@@ -23,8 +23,8 @@ pub enum AppError {
     #[error("{0}")]
     BadRequest(String),
 
-    #[error("{0}")]
-    Forbidden(String),
+    #[error("{message}")]
+    Forbidden { code: &'static str, message: String },
 
     #[error("数据库错误: {0}")]
     Database(#[from] sqlx::Error),
@@ -45,8 +45,12 @@ impl AppError {
         Self::BadRequest(message.into())
     }
 
-    pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::Forbidden(message.into())
+    /// 身份是对的、但没有这个权限（比如非建局者想邀请机器人）
+    pub fn forbidden(code: &'static str, message: impl Into<String>) -> Self {
+        Self::Forbidden {
+            code,
+            message: message.into(),
+        }
     }
 
     /// 规则引擎的错误 → HTTP 错误
@@ -64,7 +68,7 @@ impl AppError {
             Self::NotFound => (StatusCode::NOT_FOUND, "game_not_found"),
             Self::Conflict { code, .. } => (StatusCode::CONFLICT, code),
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            Self::Forbidden(_) => (StatusCode::FORBIDDEN, "not_a_player"),
+            Self::Forbidden { code, .. } => (StatusCode::FORBIDDEN, code),
             Self::Database(_) | Self::Internal(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
             }

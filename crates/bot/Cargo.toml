@@ -1,0 +1,13 @@
+[package]
+name = "nine-grid-bot"
+description = "九宫棋机器人：极小化极大搜索，只依赖规则层"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nine-grid-core = { workspace = true }
+
+[lints]
+workspace = true

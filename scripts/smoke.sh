@@ -66,6 +66,38 @@ check "棋谱可回放" "5" "$(curl -s "$BASE/api/games/$CODE/replay" | jq -r '.
 check "不存在的房间 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/games/ZZZZZZ")"
 check "非法房间码 400" "400" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/games/ABC")"
 
+echo "== 机器人 =="
+# 机器人是"另一个玩家"：它占 X 座位，落子同样进棋谱
+SOLO=$(post /api/games "{\"player_id\":\"$A\"}")
+SOLO_CODE=$(echo "$SOLO" | jq -r .code)
+check "非建局者不能邀请机器人" "not_host" \
+  "$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$B\"}" | err_code)"
+
+BV=$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\"}")
+check "机器人入座后对局开始" "in_progress" "$(echo "$BV" | jq -r .state)"
+check "X 座位被标记为机器人" "true" "$(echo "$BV" | jq -r .players.x.is_bot)"
+check "机器人有可读名字" "机器人" "$(echo "$BV" | jq -r .players.x.handle)"
+check "重复邀请机器人被拒" "game_full" "$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\"}" | err_code)"
+
+MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":0}")
+check "人类落一子后机器人立刻应招" "2" "$(echo "$MV" | jq -r .plies)"
+check "机器人占了中心" "4" "$(echo "$MV" | jq -r '.moves[1].position')"
+check "应招后轮次回到人类" "O" "$(echo "$MV" | jq -r .turn)"
+
+# 一路下到终局：每手都取当前第一个空格，机器人必须挡住所有威胁
+GUARD=0
+while [ "$(echo "$MV" | jq -r .state)" = "in_progress" ] && [ "$GUARD" -lt 9 ]; do
+  EMPTY=$(echo "$MV" | jq -r '[range(9) as $i | select(.board[$i] == null) | $i][0]')
+  VER=$(echo "$MV" | jq -r .version)
+  MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":$EMPTY,\"version\":$VER}")
+  GUARD=$((GUARD + 1))
+done
+STATE=$(echo "$MV" | jq -r .state)
+check "单人对机器人能走到终局" "true" "$([ "$STATE" != "in_progress" ] && echo true || echo "$STATE")"
+check "机器人没有被击败" "true" "$([ "$STATE" != "o_won" ] && echo true || echo "$STATE")"
+check "人机对局也留下完整棋谱" "$(echo "$MV" | jq -r .plies)" \
+  "$(curl -s "$BASE/api/games/$SOLO_CODE/replay" | jq -r '.moves | length')"
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32m全部 %d 项通过\033[0m\n' "$PASS"

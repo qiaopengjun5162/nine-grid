@@ -18,13 +18,14 @@ use crate::{
     error::AppError,
 };
 
-/// 路由表：5 个玩法接口 + 1 个健康检查，其余全部交给静态文件
+/// 路由表：6 个玩法接口 + 1 个健康检查，其余全部交给静态文件
 pub fn router(pool: PgPool, static_dir: PathBuf) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/api/games", post(create_game))
         .route("/api/games/{code}", get(get_game))
         .route("/api/games/{code}/join", post(join_game))
+        .route("/api/games/{code}/bot", post(seat_bot))
         .route("/api/games/{code}/moves", post(play_move))
         .route("/api/games/{code}/replay", get(replay))
         .fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true))
@@ -41,6 +42,12 @@ struct CreateGameRequest {
 struct JoinGameRequest {
     player_id: Uuid,
     handle: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeatBotRequest {
+    /// 只用来算"你是谁"，并校验你是建局者
+    player_id: Uuid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +99,21 @@ async fn join_game(
 ) -> Result<Json<GameView>, AppError> {
     let code = normalize_code(&code)?;
     let game = db::join_game(&pool, &code, req.player_id, req.handle.as_deref()).await?;
+    let you = game.mark_of(req.player_id);
+    Ok(Json(GameView { you, game }))
+}
+
+/// 建局者邀请机器人坐进对面的座位。
+///
+/// 机器人不是"内置模式"，而是一个占座位的普通玩家 —— 之后所有落子都走
+/// `/moves` 同一条规则路径，所以它对局也会留下完整的棋谱。
+async fn seat_bot(
+    State(pool): State<PgPool>,
+    Path(code): Path<String>,
+    Json(req): Json<SeatBotRequest>,
+) -> Result<Json<GameView>, AppError> {
+    let code = normalize_code(&code)?;
+    let game = db::seat_bot(&pool, &code, req.player_id).await?;
     let you = game.mark_of(req.player_id);
     Ok(Json(GameView { you, game }))
 }

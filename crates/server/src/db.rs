@@ -13,6 +13,14 @@ use crate::error::AppError;
 const ROOM_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const ROOM_LEN: usize = 6;
 
+/// 机器人的固定身份。
+///
+/// 它就是一个普通的 `players` 行 —— 这是有意的：机器人**不是特权角色**，
+/// 它的落子同样要走规则校验、同样写进棋谱、同样占用一个座位。
+/// 将来换成真人对手或链上地址，这一列代码不用动。
+pub const BOT_ID: Uuid = Uuid::from_u128(0xb070);
+const BOT_HANDLE: &str = "机器人";
+
 /// 连接数据库并把 migrations 全部应用一遍
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
     let pool = PgPoolOptions::new()
@@ -27,6 +35,8 @@ pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
 pub struct Seat {
     pub id: Uuid,
     pub handle: Option<String>,
+    /// 这个座位是不是机器人。前端据此显示名字、隐藏「邀请对手」之类的入口。
+    pub is_bot: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -162,6 +172,47 @@ pub async fn join_game(
         .execute(&mut *tx)
         .await?;
 
+    // X 落座即开局（不产生落子，所以棋谱里看不出来 —— 重放时要靠库里的 state 补这个信息）
+    sqlx::query(
+        "update games
+            set state = $2, turn = $3, version = version + 1, updated_at = now()
+          where id = $1",
+    )
+    .bind(game.id)
+    .bind(GameState::InProgress.as_str())
+    .bind(FIRST_MARK.code())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    snapshot(pool, code).await
+}
+
+/// 让机器人坐进 X 座位。只有建局者（O 方）能邀请。
+///
+/// 走的是和真人加入完全相同的路径：占用同一个座位、让对局进入进行中。
+pub async fn seat_bot(pool: &PgPool, code: &str, caller: Uuid) -> Result<GameSnapshot, AppError> {
+    let mut tx = pool.begin().await?;
+    let game = lock_game(&mut tx, code).await?;
+
+    // 只有建局者（O 方）能邀请机器人。
+    // 先判身份再判状态：别人房间里的状态对你来说无关紧要，直接说"你没这个权限"更清楚。
+    if seat_mark(&mut tx, game.id, caller).await? != Some(FIRST_MARK) {
+        return Err(AppError::forbidden("not_host", "只有建局者能邀请机器人"));
+    }
+    if game.state != GameState::Waiting {
+        return Err(AppError::conflict("game_full", "这一局已经开始了"));
+    }
+
+    upsert_player(&mut *tx, BOT_ID, Some(BOT_HANDLE)).await?;
+
+    sqlx::query("insert into game_players (game_id, player_id, mark) values ($1, $2, $3)")
+        .bind(game.id)
+        .bind(BOT_ID)
+        .bind(Mark::X.code())
+        .execute(&mut *tx)
+        .await?;
+
     sqlx::query(
         "update games
             set state = $2, turn = $3, version = version + 1, updated_at = now()
@@ -204,15 +255,46 @@ pub async fn play(
 
     let mark = seat_mark(&mut tx, game_row.id, player_id)
         .await?
-        .ok_or_else(|| AppError::forbidden("你不是这局棋的玩家"))?;
+        .ok_or_else(|| AppError::forbidden("not_a_player", "你不是这局棋的玩家"))?;
 
+    record_move(&mut tx, game_row.id, &mut game, mark, position, player_id).await?;
+
+    // 机器人在**同一个事务**里应招。
+    //
+    // 为什么不丢到后台任务：同步走完只有一种可观察状态，不会出现
+    // "人类下完、机器人还没动"的中间态被人读到，也就不需要额外的状态字段
+    // 来表达"正在思考"。代价是这一步多花不到 1 毫秒（见 bot crate 的测试耗时）。
+    let bot_mark = seat_mark(&mut tx, game_row.id, BOT_ID).await?;
+    if let Some(bot_mark) = bot_mark
+        && !game.is_over()
+        && game.turn() == bot_mark
+        && let Some(reply) = nine_grid_bot::choose_move(&game)
+    {
+        record_move(&mut tx, game_row.id, &mut game, bot_mark, reply, BOT_ID).await?;
+    }
+
+    tx.commit().await?;
+    snapshot(pool, code).await
+}
+
+/// 落一步棋：先过规则校验，再把 `moves` 与 `games` 一起推进。
+///
+/// 两个写操作必须在同一个事务里 —— 只写棋谱不更新状态，会让下一次重放错位。
+async fn record_move(
+    tx: &mut PgConnection,
+    game_id: Uuid,
+    game: &mut Game,
+    mark: Mark,
+    position: u8,
+    player_id: Uuid,
+) -> Result<(), AppError> {
     game.apply(mark, position).map_err(AppError::from_rule)?;
-
     let ply = i16::from(game.plies());
+
     sqlx::query(
         "insert into moves (game_id, ply, mark, position, player_id) values ($1, $2, $3, $4, $5)",
     )
-    .bind(game_row.id)
+    .bind(game_id)
     .bind(ply)
     .bind(mark.code())
     .bind(i16::from(position))
@@ -225,15 +307,14 @@ pub async fn play(
             set state = $2, turn = $3, plies = $4, version = version + 1, updated_at = now()
           where id = $1",
     )
-    .bind(game_row.id)
+    .bind(game_id)
     .bind(game.state().as_str())
     .bind(game.turn().code())
     .bind(ply)
     .execute(&mut *tx)
     .await?;
 
-    tx.commit().await?;
-    snapshot(pool, code).await
+    Ok(())
 }
 
 /// 读一局的完整快照（棋盘由棋谱重放得出）
@@ -280,18 +361,21 @@ fn random_room_code() -> String {
         .collect()
 }
 
-async fn upsert_player(
-    pool: &PgPool,
+async fn upsert_player<'e, E>(
+    executor: E,
     player_id: Uuid,
     handle: Option<&str>,
-) -> Result<(), AppError> {
+) -> Result<(), AppError>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
     sqlx::query(
         "insert into players (id, handle) values ($1, $2)
          on conflict (id) do update set handle = coalesce(excluded.handle, players.handle)",
     )
     .bind(player_id)
     .bind(handle)
-    .execute(pool)
+    .execute(executor)
     .await?;
     Ok(())
 }
@@ -347,9 +431,11 @@ where
     let mut seats = Seats { o: None, x: None };
     for row in &rows {
         let mark_code: i16 = row.try_get("mark")?;
+        let id: Uuid = row.try_get("id")?;
         let seat = Seat {
-            id: row.try_get("id")?,
+            id,
             handle: row.try_get("handle")?,
+            is_bot: id == BOT_ID,
         };
         match Mark::from_code(mark_code) {
             Some(Mark::O) => seats.o = Some(seat),

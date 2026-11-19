@@ -15,6 +15,7 @@
 
     <section id="lobby" class="panel hidden">
       <button id="create-btn" class="primary" type="button">开一局新棋</button>
+      <button id="bot-create-btn" class="ghost" type="button">和机器人下一盘</button>
       <div class="divider"><span>或者加入别人的局</span></div>
       <form id="join-form" class="join">
         <input id="code-input" maxlength="6" placeholder="6 位房间码" autocomplete="off"
@@ -45,6 +46,8 @@
       </div>
 
       <p class="status" id="status">正在加载…</p>
+
+      <button id="bot-btn" class="ghost small hidden" type="button">让机器人加入（执 X）</button>
 
       <div class="board" id="board" role="grid" aria-label="九宫棋盘"></div>
 

@@ -1,0 +1,12 @@
+# 与 rust-template / moonpub 保持同一套风格。
+#
+# 只写 rustfmt **stable** 认的选项：模板里那几个（imports_granularity、
+# group_imports、wrap_comments、normalize_comments、format_code_in_doc_comments）
+# 都是 nightly-only，写在 stable 上只会每次打印一条 "ignored" 警告，
+# 反倒让 CI 日志变脏。真想用就用 `cargo +nightly fmt`，再把这些键打开。
+style_edition = "2024"
+max_width = 100
+chain_width = 80
+array_width = 80
+use_small_heuristics = "Default"
+reorder_imports = true

@@ -1,0 +1,177 @@
+name: CI
+
+# 触发条件与 rust-template / moonpub 一致：主分支推送 + 所有 PR。
+# 单人仓库也值得跑 PR 检查 —— 它挡的是"手滑 push 到 main"。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一个分支连续推送时，取消上一轮还在跑的检查，省 runner 分钟
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: fmt（rustfmt + taplo）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      # taplo 用官方预编译产物，比 cargo install 快一个数量级
+      - name: Install taplo
+        run: |
+          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-linux-x86_64.gz \
+            | gunzip -c > "$RUNNER_TEMP/taplo"
+          chmod +x "$RUNNER_TEMP/taplo"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: taplo fmt --check
+        run: taplo fmt --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --all-targets --all-features --tests --benches -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: cargo nextest
+        run: cargo nextest run --all-features
+
+  msrv:
+    name: msrv（1.89）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cargo.toml 里写了 rust-version = "1.89"，这个 job 负责让那句话是真的。
+      # --locked 也重要：检查我们实际发布的那套依赖，而不是让旧工具链重新解析一遍。
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.89.0"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+
+      - name: cargo check --locked
+        run: cargo check --all-features --locked
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # 忽略项写在 .cargo/audit.toml 里，每条都带理由（未编译的 SQLite/MySQL 后端）
+      - name: cargo audit
+        run: cargo audit
+
+  # 真正的端到端检查：起一个 Postgres，跑 migrations + 二进制 + 33 项冒烟。
+  # 这一步才验证"服务能启动、能落库、能下完一局"，单元测试替代不了。
+  e2e:
+    name: e2e（Postgres + smoke）
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nine_grid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/nine_grid
+      BIND_ADDR: 127.0.0.1:8080
+      RUST_LOG: info,nine_grid_server=debug
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: e2e
+
+      - name: 安装冒烟脚本依赖
+        run: sudo apt-get update && sudo apt-get install -y uuid-runtime jq
+
+      - name: 编译服务端
+        run: cargo build -p nine-grid-server
+
+      - name: 启动服务并等它就绪
+        run: |
+          ./target/debug/nine-grid > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then
+              echo "服务已就绪（第 ${i} 次探测）"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "服务 30 秒内没有就绪"
+          cat /tmp/server.log
+          exit 1
+
+      - name: 跑冒烟测试
+        run: bash scripts/smoke.sh http://127.0.0.1:8080
+
+      - name: 失败时上传服务日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-log
+          path: /tmp/server.log
+          if-no-files-found: ignore

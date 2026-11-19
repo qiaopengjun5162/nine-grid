@@ -604,13 +604,7 @@ mod tests {
 
     #[test]
     fn replay_rebuilds_the_same_game() {
-        let sequence = [
-            (Mark::O, 4),
-            (Mark::X, 0),
-            (Mark::O, 3),
-            (Mark::X, 1),
-            (Mark::O, 5),
-        ];
+        let sequence = [(Mark::O, 4), (Mark::X, 0), (Mark::O, 3), (Mark::X, 1), (Mark::O, 5)];
         let replayed = Game::replay(&sequence).unwrap();
 
         let mut incremental = Game::waiting();

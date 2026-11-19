@@ -1,0 +1,133 @@
+name: release
+
+# 打 tag 才发版（`git tag v0.1.0 && git push --tags`）。
+# 不用 release-please：它用默认 GITHUB_TOKEN 建的 release 不会触发其它 workflow，
+# 需要手动补 PAT 才能串起来（moonpub 那边踩过，详见其 release.yml 注释）。
+# 这里走"tag 即真相"，一条链路，不容易出现 0 资产的空壳 release。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+
+      - uses: taiki-e/install-action@nextest
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features --tests --benches -- -D warnings
+
+      - name: nextest
+        run: cargo nextest run --all-features
+
+  build:
+    name: build（${{ matrix.suffix }}）
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            suffix: linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            suffix: linux-arm64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release -p nine-grid-server --target ${{ matrix.target }}
+
+      # 前端文件跟着二进制一起打包：服务端会在可执行文件旁边找 static/
+      # （见 main.rs 的 resolve_static_dir），解压就能跑
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="nine-grid-${{ matrix.suffix }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/nine-grid" "dist/$name/"
+          cp -R crates/server/static "dist/$name/static"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256" \
+            || sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+
+      - name: 确认静态文件确实进了包
+        run: tar tzf "dist/nine-grid-${{ matrix.suffix }}.tar.gz" | grep -q "static/index.html"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nine-grid-${{ matrix.suffix }}
+          path: |
+            dist/nine-grid-${{ matrix.suffix }}.tar.gz
+            dist/nine-grid-${{ matrix.suffix }}.tar.gz.sha256
+
+  release:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: nine-grid-*
+          merge-multiple: true
+
+      - name: 生成发版说明
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: -vv --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          body: ${{ steps.git-cliff.outputs.content }}
+          files: dist/*
+          fail_on_unmatched_files: true

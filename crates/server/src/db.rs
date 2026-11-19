@@ -23,10 +23,7 @@ const BOT_HANDLE: &str = "机器人";
 
 /// 连接数据库并把 migrations 全部应用一遍
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
-    let pool = PgPoolOptions::new()
-        .max_connections(8)
-        .connect(database_url)
-        .await?;
+    let pool = PgPoolOptions::new().max_connections(8).connect(database_url).await?;
     sqlx::migrate!("../../migrations").run(&pool).await?;
     Ok(pool)
 }
@@ -71,19 +68,9 @@ pub struct GameSnapshot {
 impl GameSnapshot {
     /// 某个玩家在这局里执什么子
     pub fn mark_of(&self, player_id: Uuid) -> Option<Mark> {
-        if self
-            .players
-            .o
-            .as_ref()
-            .is_some_and(|seat| seat.id == player_id)
-        {
+        if self.players.o.as_ref().is_some_and(|seat| seat.id == player_id) {
             Some(Mark::O)
-        } else if self
-            .players
-            .x
-            .as_ref()
-            .is_some_and(|seat| seat.id == player_id)
-        {
+        } else if self.players.x.as_ref().is_some_and(|seat| seat.id == player_id) {
             Some(Mark::X)
         } else {
             None

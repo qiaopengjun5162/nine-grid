@@ -132,8 +132,7 @@ mod tests {
         let mut game = Game::waiting();
         game.start().expect("开局");
         for &(mark, position) in moves {
-            game.apply(mark, position)
-                .expect("测试用例里的落子必须合法");
+            game.apply(mark, position).expect("测试用例里的落子必须合法");
         }
         game
     }
@@ -165,13 +164,8 @@ mod tests {
         assert_eq!(choose_move(&Game::waiting()), None);
 
         // 已经终局
-        let won = game_from(&[
-            (Mark::O, 0),
-            (Mark::X, 3),
-            (Mark::O, 1),
-            (Mark::X, 4),
-            (Mark::O, 2),
-        ]);
+        let won =
+            game_from(&[(Mark::O, 0), (Mark::X, 3), (Mark::O, 1), (Mark::X, 4), (Mark::O, 2)]);
         assert_eq!(won.state(), GameState::OWon);
         assert_eq!(choose_move(&won), None);
     }
@@ -263,13 +257,8 @@ mod tests {
     #[test]
     fn evaluation_orders_win_over_draw_over_loss() {
         // 构造三种终局，确认 WIN 基数足够大，手数调整不会翻转结论
-        let win = game_from(&[
-            (Mark::O, 0),
-            (Mark::X, 3),
-            (Mark::O, 1),
-            (Mark::X, 4),
-            (Mark::O, 2),
-        ]);
+        let win =
+            game_from(&[(Mark::O, 0), (Mark::X, 3), (Mark::O, 1), (Mark::X, 4), (Mark::O, 2)]);
         let draw = game_from(&[
             (Mark::O, 0),
             (Mark::X, 1),

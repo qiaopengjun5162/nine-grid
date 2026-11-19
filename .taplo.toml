@@ -1,0 +1,6 @@
+# TOML 格式化范围。
+#
+# 只覆盖自己维护的文件：`chain/` 是冻结的 Anchor 探路工程（里面还有 node_modules），
+# 不该被本项目的格式规则管，也不该在 CI 里被扫出来。
+include = ["*.toml", "crates/*/Cargo.toml", ".cargo/*.toml"]
+exclude = ["chain/**", "target/**"]

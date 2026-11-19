@@ -1,5 +1,11 @@
 # 九宫棋 · Nine Grid
 
+<!-- 仓库名如果改了，把下面三条 badge 里的 nine-grid 一起换掉 -->
+
+[![CI](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml)
+[![release](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.89-blue)](Cargo.toml)
+
 公园里的九宫棋（井字棋），先用 Rust 做成一个**真能下**的网页游戏。
 
 > 三个棋子横、竖、斜连成一条直线即获胜。规则只有一句话，正好用来练「把状态机写对」这件事。
@@ -68,8 +74,15 @@ nine-grid/
 │       └── static/             # index.html / style.css / app.js（无构建步骤）
 ├── migrations/0001_init.sql
 ├── scripts/smoke.sh            # 33 项端到端检查
+├── .github/
+│   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e
+│   ├── workflows/release.yml   # tag → 三平台 tar.gz + 自动发版说明
+│   └── dependabot.yml
+├── .cargo/audit.toml           # cargo-audit 的忽略项（每条带理由）
+├── .rustfmt.toml / .taplo.toml # 格式规则（stable 可用子集）
+├── cliff.toml                  # git-cliff：按 conventional commit 生成 changelog
 ├── chain/                      # 阶段 B 的 Anchor 探路工程（已冻结）
-├── Justfile
+├── Justfile                    # just check = CI 的全部检查
 └── Cargo.toml                  # workspace
 ```
 
@@ -117,7 +130,7 @@ waiting ──join──▶ in_progress ──三连──▶ o_won / x_won
 
 ## 五、跑起来
 
-前置：Postgres 14+、Rust 1.88+。
+前置：Postgres 14+、Rust 1.89+（CI 里的 `msrv` job 会守住这条）。
 
 ```bash
 createdb nine_grid
@@ -138,9 +151,55 @@ cargo run -p nine-grid-server
 
 ---
 
-## 六、测试
+## 六、CI/CD
+
+`.github/workflows/` 里两个 workflow。每个 job 都在替一句具体的话做担保，不跑没用的检查：
+
+| job | 担保的是什么 | 对应命令 |
+|---|---|---|
+| `fmt` | 代码和 TOML 都别手搓格式 | `cargo fmt --check` + `taplo fmt --check` |
+| `clippy` | 没有"能编译但显然写错"的地方 | `cargo clippy --all-targets --all-features --tests --benches -- -D warnings` |
+| `test` | 26 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
+| `msrv` | `rust-version = "1.89"` 不是一句空话 | `cargo +1.89.0 check --locked` |
+| `audit` | 依赖里没有已知漏洞 | `cargo audit` |
+| `e2e` | **真 Postgres + 真二进制 + 33 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
+
+本地一条命令对齐 CI：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）。
+
+三个设计决定值得单独说：
+
+1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
+   所以 CI 里起一个 `postgres:17` service，跑完整个 33 项冒烟。这一步的存在感比前面五个加起来还高。
+2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
+   不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 现在改成 1.89 并且由 CI 看着。
+3. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
+   （`cargo tree -i libsqlite3-sys` 在默认 target 下返回 `nothing to print`，根本没编译进产物），
+   不是我们能升级的。用配置文件而不是 `--ignore` 参数，是为了让"为什么忽略"跟着代码一起走。
+
+发版是 tag 驱动的：
 
 ```bash
+git tag v0.1.0 && git push --tags
+```
+
+`release.yml` 会在 linux-amd64 / linux-arm64 / macos-arm64 上各打一个 tar.gz（**二进制 + static/ 一起**）+ sha256，
+发版说明用 git-cliff 按 conventional commit 自动生成。解压即用：
+
+```bash
+tar xzf nine-grid-linux-amd64.tar.gz && cd nine-grid-linux-amd64
+DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
+```
+
+`STATIC_DIR` 可以指到别处（见 `main.rs` 的 `resolve_static_dir`）。这个 fallback 顺序是刻意设计的：
+`env!("CARGO_MANIFEST_DIR")` 是**编译时**的绝对路径，在 CI 机器上是 `/home/runner/work/...`，
+原样打进发布包就会指到不存在的目录 —— 所以先找可执行文件旁边的 `static/`，再退回源码路径。
+
+---
+
+## 七、测试
+
+```bash
+just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
 cargo test                       # 26 个单元测试（core 17 + bot 9）
 bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来）
 ```
@@ -158,7 +217,7 @@ bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来
 
 ---
 
-## 七、开发中真实踩到的两个坑
+## 八、开发中真实踩到的三个坑
 
 **1. 空棋谱把 `in_progress` 算回了 `waiting`。**
 对手加入后、双方还没落子时，`moves` 是空的。最初 `snapshot` 直接用棋谱重放，
@@ -171,9 +230,17 @@ bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来
 真实对局里三连即终局，这种局面不可能出现，所以没有强行规定优先级，
 而是把测试改成断言不变量：单方三连必须判对，双方便只能要求"识别出有人赢了"。
 
+**3. 静态目录用的是编译期路径，打包必然失效。**
+原先写的是 `PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static")` —— 它在 `cargo run` 下完全正常，
+所以本地永远不会暴露问题。但 `CARGO_MANIFEST_DIR` 是**编译那一刻**的绝对路径，
+在 GitHub runner 上是 `/home/runner/work/nine-grid/...`，打进发布包后指向空气。
+是准备 release workflow 时才发现"这个包解压出来一定 404"。
+修法：`resolve_static_dir()` 按 `STATIC_DIR` → 可执行文件同级的 `static/` → 源码目录 依次回退。
+**教训是：凡是用 `env!` 拿到的路径，都要问一句"换台机器还成立吗"。**
+
 ---
 
-## 八、下一步：上链要改什么
+## 九、下一步：上链要改什么
 
 | 现在 | 上链后 | 规则代码要改吗 |
 |---|---|---|

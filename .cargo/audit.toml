@@ -1,0 +1,20 @@
+# cargo-audit 配置：`cargo audit` 会自动读取本文件（无需额外参数）。
+#
+# 这里只放**有明确理由**的忽略项。每一条都必须能回答两个问题：
+#   1. 这个依赖真的会被编译进最终产物吗？
+#   2. 为什么不是升级，而是忽略？
+#
+# 判断依据：`cargo tree -i <crate>` 在默认 target 下返回 "nothing to print"，
+# 说明它只存在于 Cargo.lock（sqlx 的可选后端），根本不会被编译。
+
+[advisories]
+ignore = [
+  # libsqlite3-sys（CVE-2026-119375，SQLite 的 C 漏洞）
+  # 来源：sqlx-sqlite。本项目 sqlx 只开 postgres 特性，sqlite 后端不会被编译。
+  "RUSTSEC-2026-0459",
+
+  # rsa 0.9.10（Marvin Attack，计时侧信道）
+  # 来源：sqlx-mysql（MySQL 的 caching_sha2 认证）。同上，mysql 后端不会被编译。
+  # 修法要等 sqlx 升到 rsa 0.10，属于上游问题。
+  "RUSTSEC-2023-0071",
+]

@@ -17,7 +17,6 @@ workspace = true
 [dependencies]
 anyhow = "1"
 axum = { workspace = true }
-chrono = { workspace = true }
 dotenvy = { workspace = true }
 nine-grid-bot = { workspace = true }
 nine-grid-core = { workspace = true }

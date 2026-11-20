@@ -1,76 +1,185 @@
+/* 九宫棋 · 立体棋盘
+ *
+ * 视觉参考公园里那台装置：锈铁框、可转动的木方块。
+ * 三个关键做法：
+ *   1. .stage 给 perspective，.board 用 rotateX 躺倒，形成真实透视；
+ *   2. 每块木格用「偏移实色阴影」做厚度，抬起时 translateZ 才看得出纵深；
+ *   3. 棋子落下用 translateZ 从空中坠入，配合合成的木质叩击声。
+ * 全部是 CSS 3D + 原生 JS，没有构建步骤、没有 WebGL 依赖。
+ */
+
 :root {
-  --paper: #f5efe3;
-  --paper-raised: #fffaf1;
-  --ink: #2b2520;
-  --muted: #7a6a58;
-  --hairline: #e2d7c4;
-  --wood: #dcb884;
-  --wood-hover: #e8ca9d;
-  --wood-win: #e3c294;
-  --frame: #8a6a4f;
+  --paper: #efe4d0;
+  --paper-raised: #fbf4e7;
+  --ink: #241d16;
+  --muted: #7b6a56;
+  --hairline: #e0d3bd;
   --rust: #9c5b3c;
-  --rust-dark: #874c31;
-  --mark-o: #2f4a3e;
-  --mark-x: #8c3b2e;
+  --rust-dark: #84482c;
+  --jade: #2f4a3e;
+  --cinnabar: #8c3b2e;
+  --gold: #c79a4e;
+  --frame: #6b4e35;
+  --wood-top: #e3c396;
+  --wood-mid: #d3ac79;
+  --wood-edge: #a97c4e;
+  --tilt-x: 18deg;
+  --tilt-z: 0deg;
+  --shift-x: 0px;
 }
 
 * { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  padding: 40px 16px 72px;
-  background: var(--paper);
+  padding: 36px 16px 80px;
   color: var(--ink);
   font-family: ui-sans-serif, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
-.page { width: min(560px, 100%); }
+/* ── 环境光：暖色顶光 + 桌面反光 + 极细颗粒，避免大面积纯色发假 ── */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 50% at 50% -8%, #fffaec 0%, rgba(255, 250, 236, 0) 62%),
+    radial-gradient(90% 60% at 50% 108%, #dcc7a5 0%, rgba(220, 199, 165, 0) 70%),
+    linear-gradient(178deg, #f5ecdb 0%, #ece0c9 52%, #e4d5ba 100%);
+}
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.5;
+}
+.glow-a {
+  width: 46vw; height: 46vw;
+  left: -14vw; top: -12vw;
+  background: radial-gradient(circle, rgba(214, 154, 96, 0.5), transparent 68%);
+}
+.glow-b {
+  width: 52vw; height: 52vw;
+  right: -18vw; bottom: -20vw;
+  background: radial-gradient(circle, rgba(120, 148, 120, 0.38), transparent 70%);
+}
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
 
-.masthead { margin-bottom: 26px; }
+.page { width: min(620px, 100%); }
+
+/* ── 页眉 ── */
+.masthead { margin-bottom: 24px; }
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
 
 h1 {
-  margin: 0 0 8px;
-  font-size: 30px;
+  margin: 0;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: 34px;
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-.sub { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.seal {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 4px;
+  background: linear-gradient(160deg, #a8462f, #8c3b2e 60%, #792f24);
+  color: #fdf1e2;
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 11px;
+  line-height: 1.05;
+  letter-spacing: 0;
+  text-align: center;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(253, 241, 226, 0.55),
+    0 2px 6px rgba(120, 45, 30, 0.35);
+  transform: rotate(-3deg);
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
 
 .panel {
+  position: relative;
   background: var(--paper-raised);
   border: 1px solid var(--hairline);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 22px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 18px 40px -28px rgba(70, 45, 20, 0.55);
 }
 
 .hidden { display: none; }
 
+/* ── 按钮 ── */
 button {
   font: inherit;
   cursor: pointer;
   border: 1px solid transparent;
   border-radius: 10px;
   padding: 12px 18px;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease,
+    transform 0.16s ease, box-shadow 0.16s ease;
 }
-
 button:disabled { cursor: default; }
 
-.primary { width: 100%; background: var(--rust); color: #fff; font-weight: 500; }
-.primary:hover { background: var(--rust-dark); }
+.primary {
+  width: 100%;
+  background: linear-gradient(180deg, #ab6846, var(--rust) 55%, var(--rust-dark));
+  color: #fff8ef;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 3px 0 #6f3b24,
+    0 10px 18px -10px rgba(110, 55, 30, 0.8);
+}
+.primary:hover {
+  background: linear-gradient(180deg, #b5734f, #a4613f 55%, #8d4d31);
+  transform: translateY(-1px);
+}
+.primary:active { transform: translateY(2px); box-shadow: 0 1px 0 #6f3b24; }
 
-.ghost { background: transparent; border-color: #d8c9b2; color: var(--ink); }
-.ghost:hover { border-color: var(--rust); color: var(--rust); }
+.ghost {
+  background: rgba(255, 252, 245, 0.6);
+  border-color: #d8c9b2;
+  color: var(--ink);
+}
+.ghost:hover { border-color: var(--rust); color: var(--rust); background: #fffaf1; }
 
 .small { padding: 8px 12px; font-size: 12px; }
 
-/* 大厅里的「和机器人下一盘」跟主按钮同宽，两个入口看起来才是并列的选择 */
-#lobby #bot-create-btn { width: 100%; margin-top: 10px; }
+.actions { display: grid; gap: 10px; }
 
 .divider {
   display: flex;
@@ -79,6 +188,7 @@ button:disabled { cursor: default; }
   margin: 18px 0;
   color: var(--muted);
   font-size: 12px;
+  letter-spacing: 0.08em;
 }
 .divider::before,
 .divider::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
@@ -91,17 +201,92 @@ button:disabled { cursor: default; }
   padding: 12px 14px;
   border: 1px solid #d8c9b2;
   border-radius: 10px;
-  background: #fff;
+  background: #fffdf8;
   color: var(--ink);
   font: inherit;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 .join input::placeholder { letter-spacing: 0.04em; color: #a49480; }
-.join input:focus { outline: 2px solid #c9a271; outline-offset: 1px; }
+.join input:focus {
+  outline: none;
+  border-color: #c9a271;
+  box-shadow: 0 0 0 3px rgba(201, 162, 113, 0.22);
+}
 
-.hint { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.hint { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
 
+/* ── 大厅里的装饰棋盘：小一号，微微倾斜，只负责第一眼的好看 ── */
+.ornament {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin: -4px 0 24px;
+}
+.mini-board {
+  display: grid;
+  grid-template-columns: repeat(3, 54px);
+  gap: 7px;
+  padding: 10px;
+  border-radius: 10px;
+  background: linear-gradient(150deg, #7a5a3d, var(--frame) 55%, #523a27);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 235, 200, 0.25),
+    0 4px 0 #47311f,
+    0 22px 26px -18px rgba(60, 35, 15, 0.85);
+  transform: perspective(520px) rotateX(18deg) rotateZ(-2deg);
+  transform-style: preserve-3d;
+}
+.mini-cell {
+  position: relative;
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  background: linear-gradient(160deg, #e8c99e, var(--wood-mid) 62%, #c69c69);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 2px 0 #c09160,
+    0 4px 0 #b0814f,
+    0 6px 0 var(--wood-edge),
+    0 9px 12px rgba(60, 35, 15, 0.3);
+  transform: translateZ(4px);
+}
+.mini-cell.o::after,
+.mini-cell.x::after {
+  content: "";
+  position: absolute;
+  inset: 26%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 26%, #6d9a83, var(--jade) 48%, #1b2d24);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.35);
+}
+.mini-cell.x::after {
+  border-radius: 2px;
+  background: none;
+}
+.mini-cell.x::before,
+.mini-cell.x::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 24%;
+  width: 12%;
+  height: 52%;
+  margin-left: -6%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #6b2a20, #b1503f 45%, #7d3226);
+  transform: rotate(45deg);
+}
+.mini-cell.x::after { transform: rotate(-45deg); }
+.ornament-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+/* ── 房间信息 ── */
 .room {
   display: flex;
   align-items: center;
@@ -109,11 +294,11 @@ button:disabled { cursor: default; }
   gap: 12px;
   margin-bottom: 16px;
 }
-.room .label { display: block; color: var(--muted); font-size: 11px; letter-spacing: 0.12em; }
+.room .label { display: block; color: var(--muted); font-size: 11px; letter-spacing: 0.14em; }
 .room strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 21px;
-  letter-spacing: 0.24em;
+  font-size: 22px;
+  letter-spacing: 0.26em;
 }
 
 .seats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
@@ -125,40 +310,90 @@ button:disabled { cursor: default; }
   padding: 10px 12px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  background: rgba(255, 253, 247, 0.7);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
-.seat.active { border-color: var(--rust); background: #fdf3e9; }
+.seat.active {
+  border-color: var(--rust);
+  background: #fdf3e9;
+  box-shadow: 0 0 0 3px rgba(156, 91, 60, 0.1);
+}
 .seat b { font-size: 13px; font-weight: 500; }
 .seat small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
 
-.mark { display: block; flex: none; }
-.mark.o { width: 18px; height: 18px; border: 3px solid var(--mark-o); border-radius: 50%; }
-.mark.x { position: relative; width: 18px; height: 18px; }
+/* 座位上的小图标（也是立体棋子的小样） */
+.mark { position: relative; display: block; flex: none; }
+.mark.o {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 26%, #7fae95, var(--jade) 46%, #1a2b22 100%);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 34%, #000 35%);
+          mask: radial-gradient(circle at 50% 50%, transparent 0 34%, #000 35%);
+}
+.mark.x { width: 18px; height: 18px; }
 .mark.x::before,
 .mark.x::after {
   content: "";
   position: absolute;
   left: 50%;
-  top: 0;
+  top: 4%;
   width: 3px;
-  height: 100%;
-  background: var(--mark-x);
+  height: 92%;
+  margin-left: -1.5px;
   border-radius: 2px;
-  transform: translateX(-50%) rotate(45deg);
+  background: linear-gradient(90deg, #6b2a20, #b1503f 45%, #7d3226);
+  transform: rotate(45deg);
 }
-.mark.x::after { transform: translateX(-50%) rotate(-45deg); }
+.mark.x::after { transform: rotate(-45deg); }
 
-.status { margin: 14px 0 12px; font-size: 14px; line-height: 1.5; }
+.status { margin: 14px 0 12px; font-size: 14px; line-height: 1.6; }
 .status.over { color: var(--rust); font-weight: 500; }
 
+/* ── 立体棋盘 ── */
+.stage {
+  perspective: 1050px;
+  perspective-origin: 50% 30%;
+  padding: 12px 4px 52px;
+  touch-action: pan-y;
+}
+
 .board {
+  --size: 100%;
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 8px;
+  gap: 14px;
+  padding: 14px;
   aspect-ratio: 1 / 1;
-  background: var(--frame);
-  border-radius: 12px;
+  border-radius: 18px;
+  background:
+    linear-gradient(150deg, rgba(255, 236, 205, 0.18), rgba(0, 0, 0, 0) 34%),
+    linear-gradient(150deg, #7d5c3e, var(--frame) 52%, #4a3321);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 236, 205, 0.3),
+    inset 0 -5px 12px rgba(0, 0, 0, 0.4),
+    0 3px 0 #5a4029,
+    0 9px 0 #3f2c1d,
+    0 16px 0 #322216,
+    0 52px 64px -36px rgba(45, 26, 9, 0.95);
+  transform: rotateX(var(--tilt-x)) rotateZ(var(--tilt-z)) translateX(var(--shift-x));
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.22, 0.85, 0.28, 1);
+  will-change: transform;
+  animation: board-in 0.75s cubic-bezier(0.22, 0.85, 0.28, 1);
+}
+
+/* 入场：像把棋盘放到桌上。不加 fill 模式，动画结束后交还给变量控制 */
+@keyframes board-in {
+  from {
+    opacity: 0;
+    transform: rotateX(40deg) rotateZ(-3deg) translateY(-26px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: rotateX(var(--tilt-x)) rotateZ(var(--tilt-z)) translateX(var(--shift-x));
+  }
 }
 
 .cell {
@@ -168,23 +403,162 @@ button:disabled { cursor: default; }
   padding: 0;
   aspect-ratio: 1 / 1;
   border: 0;
-  border-radius: 6px;
-  background: var(--wood);
-  transition: background 0.15s ease;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(
+      92deg,
+      rgba(120, 80, 40, 0.05) 0 2px,
+      rgba(255, 255, 255, 0) 2px 7px
+    ),
+    linear-gradient(160deg, #eacda3 0%, var(--wood-top) 28%, var(--wood-mid) 68%, #c49a67 100%);
+  /* 多层实色偏移叠出木块侧面，比单层阴影更能看出厚度 */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -3px 7px rgba(120, 80, 40, 0.26),
+    0 2px 0 #c99b68,
+    0 4px 0 #bd8d58,
+    0 6px 0 #b0814f,
+    0 8px 0 #a17445,
+    0 10px 0 var(--wood-edge),
+    0 14px 18px rgba(58, 34, 14, 0.36);
+  transform: translateZ(9px);
+  transform-style: preserve-3d;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
-.cell:not(:disabled):hover { background: var(--wood-hover); }
-.cell.win { background: var(--wood-win); box-shadow: inset 0 0 0 2px var(--rust); }
-.cell .mark.o { width: 46%; height: 46%; border-width: 8px; }
-.cell .mark.x { width: 46%; height: 46%; }
-.cell .mark.x::before,
-.cell .mark.x::after { width: 8px; border-radius: 4px; }
+.cell::-moz-focus-inner { border: 0; }
 
-.replay { margin-top: 18px; border-top: 1px solid var(--hairline); padding-top: 14px; }
+/* 可落子时：木块被"拿起来"一点，指针给出的反馈就是纵深 */
+.cell:not(:disabled):hover {
+  transform: translateZ(26px) translateY(-2px);
+  filter: brightness(1.05) saturate(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -3px 7px rgba(120, 80, 40, 0.2),
+    0 2px 0 #c99b68,
+    0 4px 0 #bd8d58,
+    0 6px 0 #b0814f,
+    0 8px 0 #a17445,
+    0 10px 0 var(--wood-edge),
+    0 12px 0 #96693d,
+    0 26px 30px rgba(58, 34, 14, 0.34);
+}
+.cell:not(:disabled):active { transform: translateZ(6px); }
+
+/* 悬停时先给一个极淡的落点暗示，像手指在木面上比划 */
+.cell:not(:disabled):hover::after {
+  content: "";
+  position: absolute;
+  width: 54%;
+  height: 54%;
+  border-radius: 50%;
+  border: 3px solid rgba(47, 74, 62, 0.22);
+  pointer-events: none;
+}
+
+.cell:focus-visible {
+  outline: 2px solid #c9a271;
+  outline-offset: 3px;
+}
+
+.cell.win {
+  background:
+    repeating-linear-gradient(92deg, rgba(120, 80, 40, 0.04) 0 2px, rgba(255, 255, 255, 0) 2px 7px),
+    linear-gradient(160deg, #f8e3b6, #f0d296 40%, #e3ba70);
+}
+
+/* 光晕放在伪元素上，避免每帧重算 box-shadow —— 也避免 filter 把 3D 压平 */
+.cell.win::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 15px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px rgba(199, 154, 78, 0.5),
+    0 0 30px 8px rgba(255, 196, 90, 0.55);
+  animation: win-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes win-glow {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* ── 棋子 ── */
+.cell .mark.o {
+  width: 60%;
+  height: 60%;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 42%),
+    conic-gradient(
+      from 200deg,
+      #16261e, #6f9c85 9%, #2b473b 30%,
+      #1a2b22 58%, #5d8a73 84%, #16261e
+    );
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 0 47%, #000 48%);
+          mask: radial-gradient(circle at 50% 50%, transparent 0 47%, #000 48%);
+  filter: drop-shadow(0 6px 5px rgba(30, 20, 8, 0.5));
+}
+
+.cell .mark.x { width: 60%; height: 60%; }
+.cell .mark.x::before,
+.cell .mark.x::after {
+  width: 21%;
+  top: 1%;
+  height: 98%;
+  margin-left: -10.5%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #63251c, #a8463a 30%, #dd9384 50%, #8e3a2c 76%, #5e231a);
+  box-shadow:
+    0 3px 0 #4d1c15,
+    0 7px 8px rgba(40, 20, 10, 0.42);
+  filter: none;
+}
+
+/* 落子：从上方坠入，略微过冲再稳住 */
+@keyframes drop {
+  0% { transform: translateZ(160px) scale(1.45); opacity: 0; }
+  55% { opacity: 1; }
+  78% { transform: translateZ(-4px) scale(0.97); }
+  100% { transform: translateZ(0) scale(1); opacity: 1; }
+}
+.mark.drop { animation: drop 0.44s cubic-bezier(0.3, 0.9, 0.3, 1.15) both; }
+
+/* 赢棋时棋子轻轻一跳 */
+.cell.win .mark { animation: settle 1.8s ease-in-out infinite; }
+@keyframes settle {
+  0%, 100% { transform: translateZ(0); }
+  50% { transform: translateZ(6px); }
+}
+
+.stage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 0;
+  padding-top: 4px;
+}
+.stage-hint { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; }
+
+.icon-btn {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 252, 245, 0.7);
+  color: var(--muted);
+  font-size: 11px;
+}
+.icon-btn:hover { border-color: var(--rust); color: var(--rust); }
+.icon-btn[aria-pressed="true"] { color: var(--rust); border-color: #d9bfa4; }
+
+/* ── 棋谱 ── */
+.replay { margin-top: 20px; border-top: 1px solid var(--hairline); padding-top: 14px; }
 .replay summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   list-style: none;
 }
 .replay summary::-webkit-details-marker { display: none; }
@@ -199,27 +573,207 @@ button:disabled { cursor: default; }
   line-height: 1.9;
 }
 #move-list b { color: var(--ink); font-weight: 500; }
+#move-list li:last-child { color: var(--ink); }
 
 #new-btn { margin-top: 18px; width: 100%; }
 
+/* ── 九宫源流 ── */
+.lore {
+  margin-top: 34px;
+  padding-top: 26px;
+  border-top: 1px solid var(--hairline);
+}
+
+.lore-head { margin-bottom: 20px; }
+.lore-head h2 {
+  margin: 0 0 6px;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+}
+.lore-head p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+
+.luoshu-wrap {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 16px 18px;
+  margin-bottom: 22px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 60%),
+    #fcf7ec;
+}
+
+.luoshu {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  gap: 3px;
+  flex: none;
+}
+.luoshu span {
+  display: grid;
+  place-items: center;
+  height: 44px;
+  border: 1px solid #e6d8c1;
+  border-radius: 3px;
+  background: #fffdf7;
+  color: #6d5a44;
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 18px;
+}
+.luoshu .center {
+  color: #fdf3e6;
+  background: linear-gradient(160deg, #a8462f, var(--cinnabar) 60%, #7a3025);
+  border-color: #7a3025;
+  box-shadow: inset 0 0 0 1px rgba(253, 243, 230, 0.35);
+}
+
+.luoshu-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+.luoshu-note b { color: var(--ink); font-weight: 500; letter-spacing: 0.08em; }
+
+.timeline {
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: none;
+  border-left: 1px solid var(--hairline);
+}
+.timeline li { position: relative; padding: 0 0 18px 16px; }
+.timeline li:last-child { padding-bottom: 0; }
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rust);
+  box-shadow: 0 0 0 3px var(--paper);
+}
+.timeline b {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--rust);
+}
+.timeline p {
+  margin: 0;
+  color: #5c4c3a;
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+
+.lore-more {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: rgba(255, 253, 247, 0.66);
+}
+.lore-more summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--rust);
+  letter-spacing: 0.06em;
+  list-style: none;
+}
+.lore-more summary::-webkit-details-marker { display: none; }
+.lore-more summary::before { content: "＋ "; }
+.lore-more[open] summary::before { content: "－ "; }
+.lore-body { margin-top: 14px; }
+.lore-body p {
+  margin: 0 0 10px;
+  color: #5c4c3a;
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+.lore-body b { color: var(--ink); font-weight: 600; }
+
+.principles {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: #5c4c3a;
+  font-size: 12.5px;
+  line-height: 1.9;
+}
+.principles b { color: var(--rust); font-weight: 500; }
+
+.colophon {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+  color: #9a8a74;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+/* ── 提示条 ── */
 .toast {
   position: sticky;
   bottom: 16px;
   margin-top: 16px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: var(--ink);
-  color: #fff;
+  background: rgba(36, 29, 22, 0.92);
+  color: #fff8ee;
   font-size: 13px;
   opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateY(6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
   pointer-events: none;
+  backdrop-filter: blur(4px);
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 
-@media (max-width: 420px) {
-  h1 { font-size: 26px; }
+/* ── 小屏 ── */
+@media (max-width: 640px) {
+  :root { --tilt-x: 14deg; }
+  body { padding: 24px 14px 64px; }
+  h1 { font-size: 29px; }
   .panel { padding: 18px; }
-  .seat { padding: 8px 10px; }
+  .board { gap: 10px; padding: 10px; }
+  .luoshu-wrap { gap: 16px; padding: 14px; }
+  .luoshu { grid-template-columns: repeat(3, 38px); }
+  .luoshu span { height: 38px; font-size: 16px; }
+  .colophon { flex-direction: column; gap: 6px; }
+}
+
+/* 触摸设备没有 hover，别让点过的格子一直"翘着" */
+@media (hover: none) {
+  .cell:not(:disabled):hover {
+    transform: translateZ(9px);
+    filter: none;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.72),
+      inset 0 -3px 7px rgba(120, 80, 40, 0.26),
+      0 2px 0 #c99b68,
+      0 4px 0 #bd8d58,
+      0 6px 0 #b0814f,
+      0 8px 0 #a17445,
+      0 10px 0 var(--wood-edge),
+      0 14px 18px rgba(58, 34, 14, 0.36);
+  }
+  .cell:not(:disabled):hover::after { content: none; }
+}
+
+/* 尊重系统的「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  .board { transition: none; animation: none; }
+  .cell,
+  .mark.drop,
+  .cell.win::after,
+  .cell.win .mark { animation: none !important; transition: none !important; }
 }

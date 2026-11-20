@@ -3,26 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#efe4d0">
   <title>九宫棋 · Nine Grid</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true">
+    <span class="glow glow-a"></span>
+    <span class="glow glow-b"></span>
+    <span class="grain"></span>
+  </div>
+
   <main class="page">
     <header class="masthead">
-      <h1>九宫棋</h1>
-      <p class="sub">井字棋，又叫九宫棋：三个棋子横、竖、斜连成一条直线即获胜。</p>
+      <div class="title-row">
+        <h1>九宫棋</h1>
+        <span class="seal" aria-hidden="true">九<br>宫</span>
+      </div>
+      <p class="sub">三个棋子横、竖、斜连成一线即胜。<br>棋盘形如「井」字，故又称井字棋。</p>
     </header>
 
     <section id="lobby" class="panel hidden">
-      <button id="create-btn" class="primary" type="button">开一局新棋</button>
-      <button id="bot-create-btn" class="ghost" type="button">和机器人下一盘</button>
-      <div class="divider"><span>或者加入别人的局</span></div>
+      <div class="ornament" aria-hidden="true">
+        <div class="mini-board">
+          <i class="mini-cell"></i><i class="mini-cell o"></i><i class="mini-cell"></i>
+          <i class="mini-cell x"></i><i class="mini-cell o"></i><i class="mini-cell"></i>
+          <i class="mini-cell"></i><i class="mini-cell x"></i><i class="mini-cell o"></i>
+        </div>
+        <p class="ornament-note">木块九枚，横竖斜连三子者胜</p>
+      </div>
+
+      <div class="actions">
+        <button id="create-btn" class="primary" type="button">开一局新棋</button>
+        <button id="bot-create-btn" class="ghost" type="button">和机器人下一盘</button>
+      </div>
+
+      <div class="divider"><span>或凭房间码入座</span></div>
       <form id="join-form" class="join">
-        <input id="code-input" maxlength="6" placeholder="6 位房间码" autocomplete="off"
+        <input id="code-input" maxlength="6" placeholder="六位房间码" autocomplete="off"
                spellcheck="false" inputmode="latin">
-        <button type="submit" class="ghost">加入</button>
+        <button type="submit" class="ghost">入座</button>
       </form>
-      <p class="hint">建局者执 O 先手，加入者执 X。把房间码发给对手即可。</p>
+      <p class="hint">建局者执 O 先手，入座者执 X。把房间码或链接递给对手即可。</p>
     </section>
 
     <section id="game" class="panel hidden">
@@ -41,15 +63,22 @@
         </div>
         <div class="seat" id="seat-x">
           <span class="mark x"></span>
-          <div><b>X 方</b><small id="seat-x-name">待加入</small></div>
+          <div><b>X 方</b><small id="seat-x-name">待入座</small></div>
         </div>
       </div>
 
-      <p class="status" id="status">正在加载…</p>
+      <p class="status" id="status">正在载入…</p>
 
-      <button id="bot-btn" class="ghost small hidden" type="button">让机器人加入（执 X）</button>
+      <button id="bot-btn" class="ghost small hidden" type="button">请机器人入座（执 X）</button>
 
-      <div class="board" id="board" role="grid" aria-label="九宫棋盘"></div>
+      <div class="stage" id="stage">
+        <div class="board" id="board" role="grid" aria-label="九宫棋盘"></div>
+      </div>
+
+      <div class="stage-foot">
+        <span class="stage-hint">移动指针或拖动，可转视角</span>
+        <button id="sound-btn" class="icon-btn" type="button" aria-pressed="true">声响 · 开</button>
+      </div>
 
       <details class="replay">
         <summary>棋谱 · <span id="ply-count">0</span> 手</summary>
@@ -58,6 +87,64 @@
 
       <button id="new-btn" class="ghost small hidden" type="button">再来一局</button>
     </section>
+
+    <section class="lore" aria-labelledby="lore-title">
+      <div class="lore-head">
+        <h2 id="lore-title">九宫源流</h2>
+        <p>从井田到洛书，从蒙学字格到最早的电子游戏之一</p>
+      </div>
+
+      <div class="luoshu-wrap">
+        <div class="luoshu" role="img" aria-label="洛书九宫：四九二、三五七、八一六，纵横斜相加皆为十五">
+          <span>四</span><span>九</span><span>二</span>
+          <span>三</span><span class="center">五</span><span>七</span>
+          <span>八</span><span>一</span><span>六</span>
+        </div>
+        <p class="luoshu-note">洛书九宫<br><b>纵横斜皆十五</b></p>
+      </div>
+
+      <ol class="timeline">
+        <li>
+          <b>先秦 · 井田</b>
+          <p>《孟子·滕文公上》说「方里而井，井九百亩」：一里见方的田划成九区，中间为公田，八家各耕百亩。田埂纵横如「井」字，九宫的形状自此有了名字。</p>
+        </li>
+        <li>
+          <b>汉唐 · 九宫</b>
+          <p>明堂有九室，太一有九宫，术数家把洛书的九个数字填进九格。九宫于是不只是格子，也成了一套关于方位、次序与平衡的说法。</p>
+        </li>
+        <li>
+          <b>唐宋以降 · 民间</b>
+          <p>九格、三子、轮流落子——规则简单到不需要文字就能教会，于是在乡野、茶馆、庙会里一路传下来，各地叫法不同：三子棋、成三棋、九宫棋。</p>
+        </li>
+        <li>
+          <b>明清 · 蒙学</b>
+          <p>习字也用九宫格。把字放进九个方格里，一笔一画都要交代清楚位置，写稳了再撤格。今天练字仍用九宫格与米字格。</p>
+        </li>
+        <li>
+          <b>1952 · OXO</b>
+          <p>英国学者 Alexander S. Douglas 在 EDSAC 上写出 OXO，用阴极射线管显示井字棋。它是最早的电子游戏之一——比「电子游戏」这个词诞生还早。</p>
+        </li>
+      </ol>
+
+      <details class="lore-more">
+        <summary>展开：为什么这盘棋总是和？</summary>
+        <div class="lore-body">
+          <p>九宫棋的全部棋盘排布不到两万种，其中合法局面只有五千多种，穷尽之后结论很干脆：<b>双方都不犯错，先手赢不了，后手也赢不了，一定是和棋。</b>这不是因为它简单，而是因为它太小——小到没有多余的空间容纳一次失误。</p>
+          <p>于是真正的胜负不在棋盘上，而在谁先看漏。三条最实用的次序：</p>
+          <ol class="principles">
+            <li><b>先占中心。</b>中心格参与四条连线，是唯一一个「一处四用」的位置。</li>
+            <li><b>再抢角。</b>角格参与三条连线，边格只参与两条；同样一步，角比边值钱。</li>
+            <li><b>先堵，再想。</b>对手已有两子成线时，堵是唯一正解，别处再好的布局也来不及。</li>
+          </ol>
+          <p>这个项目里的机器人就是按这套逻辑穷举搜索的。它每一步都最优，所以你最多逼平——真赢了，说明它有 bug。</p>
+        </div>
+      </details>
+    </section>
+
+    <footer class="colophon">
+      <span>九宫棋 · Rust 实现</span>
+      <span>规则在链下，棋谱可回放</span>
+    </footer>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>

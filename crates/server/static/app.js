@@ -228,6 +228,43 @@ function bindParallax() {
   ui.stage.addEventListener("pointercancel", rest);
 }
 
+// 方向键在九格间移动焦点，回车/空格由按钮本身负责落子。
+// 行、列都循环，所以从右下按右键会回到左下，不用记边界。
+function bindBoardKeys() {
+  const moves = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+  };
+
+  ui.board.addEventListener("keydown", (event) => {
+    const cells = Array.from(ui.board.children);
+    const current = cells.indexOf(document.activeElement);
+    if (current < 0) return;
+
+    let row = Math.floor(current / 3);
+    let col = current % 3;
+
+    if (event.key === "Home") {
+      row = 0;
+      col = 0;
+    } else if (event.key === "End") {
+      row = 2;
+      col = 2;
+    } else if (moves[event.key]) {
+      const [dRow, dCol] = moves[event.key];
+      row = (row + dRow + 3) % 3;
+      col = (col + dCol + 3) % 3;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    cells[row * 3 + col].focus();
+  });
+}
+
 function canPlay(view, index) {
   return Boolean(
     view &&
@@ -538,6 +575,7 @@ async function copyLink() {
 async function boot() {
   buildBoard();
   bindParallax();
+  bindBoardKeys();
   syncSoundButton();
 
   ui.createBtn.addEventListener("click", createGame);

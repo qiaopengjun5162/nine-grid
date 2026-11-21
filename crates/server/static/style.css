@@ -869,3 +869,50 @@ button:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   .conn-badge[data-kind="live"]::before { animation: none; }
 }
+
+/* ── 链上版 ── */
+.alert-panel { border-left: 3px solid var(--rust); color: #7a3b24; line-height: 1.7; }
+.alert-panel p { margin: 0; }
+.wallet-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.wallet-addr {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  color: #7a6248;
+}
+.network-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f7efe0;
+  color: #7a6248;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.room-code-block { min-width: 0; }
+.room-code-block strong {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.chain-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.tx-state {
+  flex: 1;
+  min-width: 140px;
+  font-size: 12px;
+  color: #7a6248;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.tx-state[data-kind="busy"] { color: var(--rust); }
+.tx-state[data-kind="ok"] { color: #3f7a4a; }
+.tx-state[data-kind="err"] { color: #a4613f; }
+.lore-body code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(122, 98, 72, 0.1);
+}

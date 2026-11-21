@@ -105,13 +105,14 @@ nine-grid/
 │       ├── src/events.rs       # 房间事件总线（SSE 观战用）
 │       ├── src/error.rs        # 规则错误 → HTTP 状态码
 │       ├── src/config.rs
-│       └── static/             # index.html / watch.html / app.js / watch.js（无构建步骤）
+│       └── static/             # index.html / watch.html / chain.html + 对应 js（无构建步骤）
+│           └── chain/idl.json  # 链上 IDL，从 chain/target/idl 复制，随合约提交
 ├── migrations/
 │   ├── 0001_init.sql
 │   └── 0002_bot_difficulty.sql
 ├── scripts/
 │   ├── smoke.sh                # 本地版 42 项端到端检查
-│   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试，自包含
+│   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试+前端交易验证，自包含
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
 │   │   └── src/{lib,state,errors}.rs
@@ -379,7 +380,7 @@ just chain-test                  # 链上端到端：验证器+部署+10 项真�
 ## 十一、上链：哪些换了宿主，哪些一行没动
 
 阶段 B 已经做完并跑通。链上程序用 Anchor 0.32.1，程序 ID `AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6`，
-4 个指令（create_game / join_game / play / close_game），10 项真实交易测试全过。
+4 个指令（create_game / join_game / play / close_game），10 项真实交易测试全过，另有前端交易构造验证。
 
 | 本地版 | 链上版 | 规则代码要改吗 |
 |---|---|---|
@@ -409,8 +410,26 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 链上测试环境被沙盒坑过一次：ts-node 默认在 `$HOME` 建缓存目录，受限环境里 `mkdir` 被拒，
 报成费解的 `[ERROR] No such file or directory`。`scripts/chain-test.sh` 里用 `TS_NODE_CACHE=false` 绕开了。
 
-再往后才是可选项：给链上版配一个能连 Phantom 的前端页面。
-（三档难度、SSE 观战、战绩榜都已经落地，见下。）
+### 链上前端：`/chain.html`，一个能连 Phantom 的页面
+
+浏览器端的"另一半"已经补齐。打开 `/chain.html`，连 Phantom 就能建局、凭 PDA 地址入座、
+点击落子、终局后关局退租金。几个实现上的取舍：
+
+- **无构建步骤**：Anchor 和 web3.js 通过 importmap 从 esm.sh 按 ESM 加载（版本与 `chain/package.json` 对齐），
+  IDL 本地托管在 `/chain/idl.json` —— 页面是纯静态文件，不需要打包器。
+- **Phantom → Anchor Wallet**：Phantom 注入的 `window.solana` 已经有 `publicKey` 和签名方法，
+  补一层薄适配器就能喂给 `AnchorProvider`，不用引入整套 wallet-adapter。
+- **账户订阅代替轮询**：`connection.onAccountChange(pda, …)` 在账户变化时重新解码渲染，
+  比本地版的 1.2 秒轮询更及时；解码用的仍是链上账户的真实数据，前端不自己算棋盘。
+- **PDA 地址就是房间号**：`["game", 创建者公钥, game_id_le]` 派生出的地址可以直接当邀请链接发出去，
+  没有中心化的房间表。
+
+因为浏览器里没法自动操作 Phantom，`chain-test.sh` 的第 5 步用 Node keypair 代替钱包，
+以**和 chain.js 完全相同的方式**（同一份 IDL、同样的 PDA 派生、同样的 `program.methods` 调用、
+同样的账户解码）跑一局，保证前端的交易构造逻辑不跑偏。真机上仍需手动连 Phantom 验证签名流程。
+
+再往后才是可选项：把合约部署到公开集群、给观战加回放时间轴、做跨局积分。
+（三档难度、SSE 观战、战绩榜、连 Phantom 的链上前端都已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。

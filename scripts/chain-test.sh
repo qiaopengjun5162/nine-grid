@@ -27,10 +27,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> 1/4 编译 .so"
+echo "==> 1/5 编译 .so"
 (cd "$CHAIN" && anchor build >/dev/null 2>&1)
 
-echo "==> 2/4 启动本地验证器"
+echo "==> 2/5 启动本地验证器"
 lsof -ti tcp:8899 2>/dev/null | xargs kill 2>/dev/null || true
 sleep 0.4
 rm -rf "$LEDGER"
@@ -42,12 +42,12 @@ for _ in $(seq 1 40); do
 done
 solana cluster-version --url "$RPC" | head -1
 
-echo "==> 3/4 部署程序 $PROGRAM_ID"
+echo "==> 3/5 部署程序 $PROGRAM_ID"
 (cd "$CHAIN" && solana program deploy --url "$RPC" \
   --program-id target/deploy/nine_grid-keypair.json \
   target/deploy/nine_grid.so 2>&1 | grep -E "Program Id|Signature" | head -2)
 
-echo "==> 4/4 跑 TS 集成测试（10 项）"
+echo "==> 4/5 跑 TS 集成测试（10 项）"
 cd "$CHAIN"
 ANCHOR_PROVIDER_URL="$RPC" \
 ANCHOR_WALLET="$WALLET" \
@@ -56,5 +56,10 @@ TS_NODE_CACHE=false \
 node -r ./node_modules/ts-node/register \
   ./node_modules/mocha/bin/mocha -t 1000000 tests/nine-grid.ts 2>&1 \
   | grep -vE "DeprecationWarning|MODULE_TYPELESS|Reparsing as ES|To eliminate|trace-warnings|trace-deprecation|punycode"
+
+echo "==> 5/5 验证链上前端的交易构造方式"
+# chain.js（浏览器）用的 IDL、PDA 派生、program.methods 调用和账户订阅解码，
+# 在这里用 Node keypair 代替 Phantom 跑一遍，保证浏览器端逻辑不跑偏。
+node verify-frontend.js 2>&1 | grep -vE "DeprecationWarning|trace-deprecation|punycode"
 
 echo "==> 完成"

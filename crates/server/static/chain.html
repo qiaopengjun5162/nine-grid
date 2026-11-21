@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#efe4d0">
+  <title>链上对局 · 九宫棋</title>
+  <link rel="stylesheet" href="/style.css">
+  <!--
+    链上版依赖 Anchor + web3.js。为了保持"无构建步骤"，从 esm.sh 按 ESM 加载，
+    配合下面的 importmap 固定版本。首次打开需联网；依赖版本与 chain/package.json 对齐。
+    IDL 本地托管在 /chain/idl.json，随合约一起提交。
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@coral-xyz/anchor": "https://esm.sh/@coral-xyz/anchor@0.32.1?target=es2022",
+      "@solana/web3.js": "https://esm.sh/@solana/web3.js@1.98.4?target=es2022"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true">
+    <span class="glow glow-a"></span>
+    <span class="glow glow-b"></span>
+    <span class="grain"></span>
+  </div>
+
+  <main class="page">
+    <header class="masthead">
+      <div class="title-row">
+        <h1>链上对局</h1>
+        <span class="seal" aria-hidden="true">链<br>上</span>
+      </div>
+      <p class="sub">规则跑在 Solana 链上，同一份 core。<br>钱包签名落子，判胜由程序说了算。</p>
+      <nav class="top-nav">
+        <a href="/">本地版</a>
+        <a href="/watch.html">观战</a>
+      </nav>
+    </header>
+
+    <!-- 依赖/钱包没就绪时显示，正常对局时隐藏 -->
+    <section id="chain-alert" class="panel alert-panel hidden" role="alert">
+      <p id="chain-alert-text"></p>
+    </section>
+
+    <section id="chain-lobby" class="panel">
+      <div class="wallet-row">
+        <button id="connect-btn" class="primary" type="button">连接 Phantom 钱包</button>
+        <span id="wallet-addr" class="wallet-addr">未连接</span>
+      </div>
+      <div id="network-note" class="network-note hidden"></div>
+
+      <div class="divider"><span>建局，或凭 PDA 地址入座</span></div>
+      <div class="actions">
+        <button id="chain-create-btn" class="primary" type="button" disabled>建一局（我执 O）</button>
+      </div>
+      <form id="chain-join-form" class="join">
+        <input id="chain-pda-input" placeholder="对局 PDA 地址" autocomplete="off" spellcheck="false">
+        <button type="submit" class="ghost" disabled>入座（执 X）</button>
+      </form>
+      <p class="hint">建局后把 PDA 地址或链接递给对手。地址由钱包 + 对局编号派生，无需中心服务器。</p>
+    </section>
+
+    <section id="chain-game" class="panel hidden">
+      <div class="room">
+        <div class="room-code-block">
+          <span class="label">对局地址（PDA）</span>
+          <strong id="chain-pda-display">—</strong>
+        </div>
+        <button id="chain-copy-btn" class="ghost small" type="button">复制地址</button>
+      </div>
+
+      <div class="seats">
+        <div class="seat" id="chain-seat-o">
+          <span class="mark o"></span>
+          <div><b>O 方</b><small id="chain-seat-o-name">—</small></div>
+        </div>
+        <div class="seat" id="chain-seat-x">
+          <span class="mark x"></span>
+          <div><b>X 方</b><small id="chain-seat-x-name">—</small></div>
+        </div>
+      </div>
+
+      <p class="status" id="chain-status" role="status" aria-live="polite">正在读取链上状态…</p>
+
+      <div class="stage" id="chain-stage">
+        <div class="board" id="chain-board" role="group" aria-label="链上九宫棋盘"></div>
+      </div>
+
+      <div class="chain-foot">
+        <span id="chain-tx-state" class="tx-state">等待签名</span>
+        <button id="chain-close-btn" class="ghost small hidden" type="button">关局退租金</button>
+        <button id="chain-leave-btn" class="ghost small" type="button">退出</button>
+      </div>
+    </section>
+
+    <section class="lore" aria-labelledby="chain-faq-title">
+      <div class="lore-head">
+        <h2 id="chain-faq-title">链上版说明</h2>
+        <p>和本地版到底有什么不一样</p>
+      </div>
+      <div class="lore-body">
+        <p><b>同一份规则。</b>链上程序和本地服务都调用 <code>nine-grid-core</code> 的 <code>Game::apply</code>。
+        判胜、轮次、终局冻结只有一份实现，钱包签名和账户存储才是链特有的。</p>
+        <p><b>身份来自钱包。</b>本地版用浏览器里的 UUID 认人，链上版用钱包公钥：
+        建局者执 O，加入者执 X，落子交易必须由对应钱包签名。别人改不了你的子。</p>
+        <p><b>账户即棋盘。</b>一局棋是一个 PDA 账户（101 字节），棋盘快照直接存在链上；
+        每步落子发 <code>MovePlayed</code> 事件，棋谱由事件拼出来。账户锁天然串行，不需要本地版的行锁。</p>
+        <p><b>要跑起来。</b>先起本地验证器并部署程序（见 <code>scripts/chain-test.sh</code>），
+        再把 Phantom 切到对应的 localnet / devnet。程序地址写在 IDL 里，前端不改一行。</p>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/chain.js"></script>
+</body>
+</html>

@@ -1,0 +1,463 @@
+{
+  "address": "AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6",
+  "metadata": {
+    "name": "nine_grid",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "close_game",
+      "docs": [
+        "收尾：关掉账户，把租金退还给创建者。",
+        "",
+        "只有创建者能关自己付过租金的棋局。注意这一步会让该局棋彻底消失，",
+        "想留作「链上棋谱」的话就别调它。"
+      ],
+      "discriminator": [
+        237,
+        236,
+        157,
+        201,
+        253,
+        20,
+        248,
+        67
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "player_o",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "game"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_game",
+      "docs": [
+        "创建一局棋。创建者执 O 先手，并支付账户租金。",
+        "",
+        "`game_id` 由客户端随便给（时间戳之类），同一个创建者可以有无数局，",
+        "每局地址不同。"
+      ],
+      "discriminator": [
+        124,
+        69,
+        75,
+        66,
+        184,
+        220,
+        72,
+        206
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player_o"
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_o",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "join_game",
+      "docs": [
+        "加入一局正在等人的棋，加入者执 X 后手。"
+      ],
+      "discriminator": [
+        107,
+        112,
+        18,
+        38,
+        56,
+        173,
+        60,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "player_x",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "play",
+      "docs": [
+        "在 `position`（0-8）落子。",
+        "",
+        "身份校验（是不是参与者）是链特有的，留在合约里；",
+        "轮次、占位、越界、判胜、终局冻结全部交给 core 的 `Game::apply`——",
+        "与本地版服务端走的是同一段代码，不存在第二份规则。"
+      ],
+      "discriminator": [
+        213,
+        157,
+        193,
+        142,
+        228,
+        56,
+        248,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "player",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "position",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Game",
+      "discriminator": [
+        27,
+        90,
+        166,
+        125,
+        74,
+        100,
+        121,
+        18
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "GameCreated",
+      "discriminator": [
+        218,
+        25,
+        150,
+        94,
+        177,
+        112,
+        96,
+        2
+      ]
+    },
+    {
+      "name": "MovePlayed",
+      "discriminator": [
+        61,
+        60,
+        170,
+        174,
+        207,
+        166,
+        163,
+        146
+      ]
+    },
+    {
+      "name": "PlayerJoined",
+      "discriminator": [
+        39,
+        144,
+        49,
+        106,
+        108,
+        210,
+        183,
+        38
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "GameNotStarted",
+      "msg": "这局棋还在等对手加入"
+    },
+    {
+      "code": 6001,
+      "name": "GameAlreadyOver",
+      "msg": "对局已经结束了"
+    },
+    {
+      "code": 6002,
+      "name": "GameAlreadyFull",
+      "msg": "这一局已经有对手了"
+    },
+    {
+      "code": 6003,
+      "name": "CannotPlayYourself",
+      "msg": "不能和自己下棋"
+    },
+    {
+      "code": 6004,
+      "name": "NotYourTurn",
+      "msg": "还没轮到你落子"
+    },
+    {
+      "code": 6005,
+      "name": "CellOccupied",
+      "msg": "这个格子已经有棋子了"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidPosition",
+      "msg": "格子位置必须是 0-8"
+    },
+    {
+      "code": 6007,
+      "name": "NotAPlayer",
+      "msg": "你不是这局棋的玩家"
+    },
+    {
+      "code": 6008,
+      "name": "InconsistentState",
+      "msg": "对局数据自相矛盾"
+    }
+  ],
+  "types": [
+    {
+      "name": "Game",
+      "docs": [
+        "一局九宫棋的完整链上状态。",
+        "",
+        "所有字段都是定长的，所以空间可以在编译期算出来（`Game::INIT_SPACE`），",
+        "不需要 `realloc`。账户布局 101 字节，与冻结版完全一致 —— 老账户可直接读。"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player_o",
+            "docs": [
+              "创建者 / O 方，租金由它支付"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "player_x",
+            "docs": [
+              "X 方，加入前是 `Pubkey::default()`"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "board",
+            "docs": [
+              "9 个格子：0 空 / 1 O / 2 X"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                9
+              ]
+            }
+          },
+          {
+            "name": "turn",
+            "docs": [
+              "当前该谁落子（MARK_O / MARK_X）"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "state",
+            "docs": [
+              "对局状态"
+            ],
+            "type": {
+              "defined": {
+                "name": "GameState"
+              }
+            }
+          },
+          {
+            "name": "game_id",
+            "docs": [
+              "客户端传入的对局编号，配合 player_o 派生出唯一地址"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "moves",
+            "docs": [
+              "已落子数量，等于 9 且无胜者即为平局"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "创建时间（链上时钟，秒）"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump，保存下来省掉后续重复计算"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player_o",
+            "type": "pubkey"
+          },
+          {
+            "name": "game_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameState",
+      "docs": [
+        "对局状态机（链上账户的存储投影）。",
+        "",
+        "变体顺序与 [`nine_grid_core::GameState::to_code`] 严格一致：",
+        "Waiting=0, InProgress=1, OWon=2, XWon=3, Draw=4。",
+        "这里保留 Anchor 派生是为了让 IDL 和前端能读到可读的枚举名；",
+        "真正的状态转换规则住在 core，不在本文件。"
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "WaitingForOpponent"
+          },
+          {
+            "name": "InProgress"
+          },
+          {
+            "name": "OWon"
+          },
+          {
+            "name": "XWon"
+          },
+          {
+            "name": "Draw"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MovePlayed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "mark",
+            "type": "u8"
+          },
+          {
+            "name": "position",
+            "type": "u8"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "GameState"
+              }
+            }
+          },
+          {
+            "name": "next_turn",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerJoined",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player_x",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

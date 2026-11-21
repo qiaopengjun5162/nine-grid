@@ -317,6 +317,86 @@ async fn record_move(
     Ok(())
 }
 
+/// 战绩榜里的一行。只统计真人对真人的终局对局。
+#[derive(Debug, Clone, Serialize)]
+pub struct LeaderboardEntry {
+    pub player_id: Uuid,
+    pub handle: Option<String>,
+    pub played: i64,
+    pub wins: i64,
+    pub losses: i64,
+    pub draws: i64,
+    /// 胜率，0.0–1.0；前端自己乘 100 显示
+    pub win_rate: f64,
+}
+
+/// 战绩榜：只统计真人对真人的终局对局。
+///
+/// 为什么排除人机局：否则挂个简单机器人刷一百局就能霸榜，数字就失去意义了。
+/// 判定"人机局"的办法是看这局有没有机器人座位（player_id = BOT_ID）——
+/// 不用加字段，机器人身份本来就是一个普通 players 行。
+pub async fn leaderboard(pool: &PgPool) -> Result<Vec<LeaderboardEntry>, AppError> {
+    let rows = sqlx::query(
+        "with human_games as (
+            select g.id, g.state
+              from games g
+             where g.state in ('o_won', 'x_won', 'draw')
+               -- 两个座位都不是机器人
+               and not exists (
+                    select 1 from game_players gp
+                     where gp.game_id = g.id and gp.player_id = $1
+               )
+         ),
+         per_player as (
+            select gp.player_id,
+                   p.handle,
+                   case
+                     when hg.state = 'draw' then 'draw'
+                     when (hg.state = 'o_won' and gp.mark = 1)
+                       or (hg.state = 'x_won' and gp.mark = 2) then 'win'
+                     else 'loss'
+                   end as result
+              from human_games hg
+              join game_players gp on gp.game_id = hg.id
+              join players p on p.id = gp.player_id
+         )
+         select player_id,
+                max(handle) as handle,
+                count(*)::bigint as played,
+                count(*) filter (where result = 'win')::bigint as wins,
+                count(*) filter (where result = 'loss')::bigint as losses,
+                count(*) filter (where result = 'draw')::bigint as draws
+           from per_player
+          group by player_id
+          order by wins desc, draws desc, played desc
+          limit 50",
+    )
+    .bind(BOT_ID)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let played: i64 = row.try_get("played")?;
+            let wins: i64 = row.try_get("wins")?;
+            Ok(LeaderboardEntry {
+                player_id: row.try_get("player_id")?,
+                handle: row.try_get("handle")?,
+                played,
+                wins,
+                losses: row.try_get("losses")?,
+                draws: row.try_get("draws")?,
+                win_rate: if played > 0 {
+                    wins as f64 / played as f64
+                } else {
+                    0.0
+                },
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?)
+}
+
 /// 读一局的完整快照（棋盘由棋谱重放得出）
 pub async fn snapshot(pool: &PgPool, code: &str) -> Result<GameSnapshot, AppError> {
     let row = sqlx::query("select * from games where code = $1")

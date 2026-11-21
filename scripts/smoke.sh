@@ -116,6 +116,43 @@ BAD_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/games/$BA
   -H 'content-type: application/json' -d "{\"player_id\":\"$A\",\"difficulty\":\"impossible\"}")
 check "非法难度被拒" "422" "$BAD_STATUS"
 
+# 观战 SSE：订阅后落子，应收到 move 事件（事件里只带通知，端上回拉快照）
+echo "== 观战与战绩 =="
+WATCH_A=$(uuidgen | tr 'A-Z' 'a-z')
+WATCH_B=$(uuidgen | tr 'A-Z' 'a-z')
+WC=$(post /api/games "{\"player_id\":\"$WATCH_A\"}" | jq -r .code)
+post "/api/games/$WC/join" "{\"player_id\":\"$WATCH_B\"}" > /dev/null
+curl -sN -m 4 "$BASE/api/games/$WC/events" > /tmp/smoke-sse.txt 2>/dev/null &
+SSE_PID=$!
+sleep 1
+post "/api/games/$WC/moves" "{\"player_id\":\"$WATCH_A\",\"position\":4}" > /dev/null
+wait $SSE_PID 2>/dev/null
+check "SSE 观战收到落子通知" "1" "$(grep -c '^event: move' /tmp/smoke-sse.txt)"
+
+# 战绩榜：真人局进榜，人机局不进榜（防止刷简单机器人霸榜）
+LB_BODY=$(curl -s "$BASE/api/leaderboard")
+check "战绩榜接口可用" "array" "$([ "$(echo "$LB_BODY" | jq -r '.entries | type')" = array ] && echo array || echo bad)"
+LB_A=$(uuidgen | tr 'A-Z' 'a-z')
+LB_B=$(uuidgen | tr 'A-Z' 'a-z')
+LB_SOLO=$(uuidgen | tr 'A-Z' 'a-z')
+LC=$(post /api/games "{\"player_id\":\"$LB_A\"}" | jq -r .code)
+post "/api/games/$LC/join" "{\"player_id\":\"$LB_B\"}" > /dev/null
+for P in 0 3 1 4 2; do
+  if [ "$P" = 0 ] || [ "$P" = 1 ] || [ "$P" = 2 ]; then WHO=$LB_A; else WHO=$LB_B; fi
+  post "/api/games/$LC/moves" "{\"player_id\":\"$WHO\",\"position\":$P}" > /dev/null
+done
+SC=$(post /api/games "{\"player_id\":\"$LB_SOLO\"}" | jq -r .code)
+post "/api/games/$SC/bot" "{\"player_id\":\"$LB_SOLO\",\"difficulty\":\"easy\"}" > /dev/null
+for P in 0 1 2 3 4 5; do
+  RES=$(post "/api/games/$SC/moves" "{\"player_id\":\"$LB_SOLO\",\"position\":$P}")
+  [ "$(echo "$RES" | jq -r .state)" != in_progress ] && break
+done
+LB_FRESH=$(curl -s "$BASE/api/leaderboard")
+check "真人局进战绩榜" "true" \
+  "$(echo "$LB_FRESH" | jq -e --arg id "$LB_A" '.entries[] | select(.player_id==$id)' >/dev/null && echo true || echo false)"
+check "人机局不进战绩榜" "false" \
+  "$(echo "$LB_FRESH" | jq -e --arg id "$LB_SOLO" '.entries[] | select(.player_id==$id)' >/dev/null && echo true || echo false)"
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32m全部 %d 项通过\033[0m\n' "$PASS"

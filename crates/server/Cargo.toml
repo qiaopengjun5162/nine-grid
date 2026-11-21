@@ -16,8 +16,10 @@ workspace = true
 
 [dependencies]
 anyhow = "1"
+async-stream = "0.3"
 axum = { workspace = true }
 dotenvy = { workspace = true }
+futures-util = "0.3"
 nine-grid-bot = { workspace = true }
 nine-grid-core = { workspace = true }
 rand = { workspace = true }

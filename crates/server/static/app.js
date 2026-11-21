@@ -556,6 +556,36 @@ function showLobby() {
   document.title = "九宫棋 · Nine Grid";
 }
 
+// ── 战绩榜：只统计真人对真人，数据来自 /api/leaderboard ──
+async function loadLeaderboard() {
+  const body = document.getElementById("leaderboard-body");
+  if (!body) return;
+  try {
+    const data = await api("/api/leaderboard");
+    const entries = data.entries ?? [];
+    if (entries.length === 0) {
+      body.innerHTML = '<tr><td colspan="4" class="board-empty">还没有真人对局，先下一盘吧</td></tr>';
+      return;
+    }
+    body.innerHTML = entries
+      .map((entry, index) => {
+        const name = entry.handle || entry.player_id.slice(0, 6).toUpperCase();
+        const record = `${entry.wins} 胜 / ${entry.losses} 负 / ${entry.draws} 平`;
+        const rate = `${Math.round(entry.win_rate * 100)}%`;
+        return `<tr><td>${index + 1}</td><td>${escapeHtml(name)}</td><td>${record}（${entry.played} 局）</td><td>${rate}</td></tr>`;
+      })
+      .join("");
+  } catch {
+    body.innerHTML = '<tr><td colspan="4" class="board-empty">战绩载入失败</td></tr>';
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 let toastTimer = null;
 
 function toast(message) {
@@ -585,6 +615,12 @@ async function boot() {
   bindParallax();
   bindBoardKeys();
   syncSoundButton();
+  loadLeaderboard();
+
+  // 从导航点「战绩榜」进来时自动展开折叠面板
+  if (location.hash === "#leaderboard") {
+    document.getElementById("leaderboard-details")?.setAttribute("open", "");
+  }
 
   ui.createBtn.addEventListener("click", createGame);
   ui.botCreateBtn.addEventListener("click", createBotGame);

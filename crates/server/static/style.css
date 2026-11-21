@@ -799,3 +799,73 @@ button:disabled { cursor: default; }
   .cell.win::after,
   .cell.win .mark { animation: none !important; transition: none !important; }
 }
+
+/* ── 顶部导航 ── */
+.top-nav { display: flex; gap: 18px; margin-top: 10px; }
+.top-nav a {
+  color: var(--rust);
+  font-size: 13px;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  padding-bottom: 2px;
+}
+.top-nav a:hover { border-bottom-color: var(--rust); }
+
+/* ── 观战连接状态 ── */
+.conn-badge {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #d8c9b2;
+  color: #7a6248;
+  white-space: nowrap;
+}
+.conn-badge[data-kind="live"] {
+  color: #3f7a4a;
+  border-color: #8fbf95;
+  background: #f0f8f1;
+}
+.conn-badge[data-kind="live"]::before {
+  content: "";
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #4caf60;
+  animation: pulse 1.8s infinite;
+}
+.conn-badge[data-kind="dead"],
+.conn-badge[data-kind="retry"] { color: #a4613f; border-color: #d8a98f; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ── 战绩榜 ── */
+.leaderboard-panel { padding: 0; }
+.leaderboard-panel summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 18px 22px;
+}
+.leaderboard-panel summary::-webkit-details-marker { display: none; }
+.leaderboard-panel summary::after {
+  content: "▾";
+  float: right;
+  color: var(--rust);
+  transition: transform 0.2s;
+}
+.leaderboard-panel details[open] summary::after { transform: rotate(180deg); }
+.leaderboard-panel h2 { margin: 0; font-size: 18px; }
+.leaderboard-panel summary p { margin: 4px 0 0; font-size: 12px; color: #7a6248; }
+.board-wrap { padding: 0 22px 18px; overflow-x: auto; }
+.leaderboard-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.leaderboard-table th,
+.leaderboard-table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #e3d7c4; }
+.leaderboard-table th { color: #7a6248; font-weight: 500; font-size: 12px; }
+.leaderboard-table td:first-child { color: var(--rust); font-weight: 600; width: 32px; }
+.leaderboard-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.board-empty { text-align: center !important; color: #9a8a76; padding: 20px 8px !important; }
+
+#watch-seat-o.active, #watch-seat-x.active { border-color: var(--gold); }
+
+@media (prefers-reduced-motion: reduce) {
+  .conn-badge[data-kind="live"]::before { animation: none; }
+}

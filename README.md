@@ -59,6 +59,18 @@
 所以即使简单档"放水"，它落的每一步也依然是规则允许的合法棋。
 数据库默认值是 `hard`，老数据不用回填就保持原行为。
 
+### 观战与战绩：通知归通知，裁决归裁决
+
+**观战**（`/watch.html?room=CODE`）走 SSE：每个房间一个广播频道，落子/入座后推一条轻量
+`move` 事件（`{code, plies, state, version}`）。观战端收到后**回拉完整快照**重新渲染，
+自己不判胜负、不算轮次 —— 所以它和玩家端看到的是同一份服务端真相，不存在"观战端算出另一个结果"的可能。
+订阅前先拉一次快照，避免漏掉订阅之前的落子；每 15 秒一条心跳，防止反向代理掐断长连接。
+
+**战绩榜**（`/api/leaderboard`）只统计**真人对真人**的终局对局：
+判定人机局的办法是看这局有没有机器人座位（机器人就是一个 `player_id = BOT_ID` 的普通玩家行），
+有则整局排除。否则挂个简单机器人刷一百局就能霸榜，数字就没有意义了。
+聚合用一条 CTE：终局局 → 每玩家胜负平 → group by，不新增表。
+
 ### 三条铁律
 
 1. **本地版：棋谱是唯一真相；链上版：盘面快照 + 事件是真相。**
@@ -88,14 +100,17 @@ nine-grid/
 │   │   └── src/lib.rs          # 三档难度共用一套搜索，13 个测试（含 200 局不败验证）
 │   └── server/
 │       ├── src/main.rs         # 启动、日志、优雅退出
-│       ├── src/api.rs          # 7 个路由
-│       ├── src/db.rs           # sqlx 查询 + 事务 + 锁 + 机器人应招
+│       ├── src/api.rs          # 玩法 + SSE 观战 + 战绩榜路由
+│       ├── src/db.rs           # sqlx 查询 + 事务 + 锁 + 机器人应招 + 战绩聚合
+│       ├── src/events.rs       # 房间事件总线（SSE 观战用）
 │       ├── src/error.rs        # 规则错误 → HTTP 状态码
 │       ├── src/config.rs
-│       └── static/             # index.html / style.css / app.js（无构建步骤）
-├── migrations/0001_init.sql
+│       └── static/             # index.html / watch.html / app.js / watch.js（无构建步骤）
+├── migrations/
+│   ├── 0001_init.sql
+│   └── 0002_bot_difficulty.sql
 ├── scripts/
-│   ├── smoke.sh                # 本地版 38 项端到端检查
+│   ├── smoke.sh                # 本地版 42 项端到端检查
 │   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试，自包含
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
@@ -145,7 +160,11 @@ waiting ──join──▶ in_progress ──三连──▶ o_won / x_won
 | GET | `/api/games/{code}?player_id=` | 全量局面（`you` 告诉你执什么子） |
 | POST | `/api/games/{code}/moves` | 落子 `{player_id, position, version}` |
 | GET | `/api/games/{code}/replay` | 纯棋谱，可独立重放 |
+| GET | `/api/games/{code}/events` | SSE 观战流：只推 `move` 通知，端上收到后回拉快照 |
+| GET | `/api/leaderboard` | 战绩榜（只统计真人对真人） |
 | GET | `/healthz` | 健康检查（含 DB 探活） |
+
+另有观战页 `/watch.html?room=CODE`：只读旁观，收到 SSE 通知后回拉完整快照，不自己判规则。
 
 错误统一为 `{"error": {"code": "...", "message": "..."}}`：
 
@@ -189,14 +208,14 @@ cargo run -p nine-grid-server
 | `test` | 26 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
 | `msrv` | `rust-version = "1.89"` 不是一句空话 | `cargo +1.89.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
-| `e2e` | **真 Postgres + 真二进制 + 38 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
+| `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
 
 本地一条命令对齐 CI：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）。
 
 三个设计决定值得单独说：
 
 1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
-   所以 CI 里起一个 `postgres:17` service，跑完整个 38 项冒烟。这一步的存在感比前面五个加起来还高。
+   所以 CI 里起一个 `postgres:17` service，跑完整个 42 项冒烟。这一步的存在感比前面五个加起来还高。
 2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
    不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 现在改成 1.89 并且由 CI 看着。
 3. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
@@ -228,7 +247,7 @@ DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
 ```bash
 just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
 cargo test                       # 31 个单元测试（core 22 + bot 9）
-bash scripts/smoke.sh            # 本地版 38 项端到端检查（服务需先跑起来）
+bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
 ```
@@ -390,8 +409,8 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 链上测试环境被沙盒坑过一次：ts-node 默认在 `$HOME` 建缓存目录，受限环境里 `mkdir` 被拒，
 报成费解的 `[ERROR] No such file or directory`。`scripts/chain-test.sh` 里用 `TS_NODE_CACHE=false` 绕开了。
 
-再往后才是可选项：战绩与排行榜、观战实时化（SSE），或者给链上版配一个能连 Phantom 的前端页面。
-（三档难度已经落地，见下。）
+再往后才是可选项：给链上版配一个能连 Phantom 的前端页面。
+（三档难度、SSE 观战、战绩榜都已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。

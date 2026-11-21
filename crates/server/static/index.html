@@ -21,6 +21,10 @@
         <span class="seal" aria-hidden="true">九<br>宫</span>
       </div>
       <p class="sub">三个棋子横、竖、斜连成一线即胜。<br>棋盘形如「井」字，故又称井字棋。</p>
+      <nav class="top-nav">
+        <a href="/watch.html">观战</a>
+        <a href="#leaderboard">战绩榜</a>
+      </nav>
     </header>
 
     <section id="lobby" class="panel hidden">
@@ -93,6 +97,25 @@
       </details>
 
       <button id="new-btn" class="ghost small hidden" type="button">再来一局</button>
+    </section>
+
+    <section id="leaderboard" class="panel leaderboard-panel" aria-labelledby="leaderboard-title">
+      <details id="leaderboard-details">
+        <summary>
+          <h2 id="leaderboard-title">战绩榜</h2>
+          <p>只统计真人对真人的对局</p>
+        </summary>
+        <div class="board-wrap">
+          <table class="leaderboard-table">
+            <thead>
+              <tr><th>#</th><th>棋手</th><th>战绩</th><th>胜率</th></tr>
+            </thead>
+            <tbody id="leaderboard-body">
+              <tr><td colspan="4" class="board-empty">载入中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </section>
 
     <section class="lore" aria-labelledby="lore-title">

@@ -2,12 +2,13 @@ mod api;
 mod config;
 mod db;
 mod error;
+mod events;
 
 use std::path::PathBuf;
 
 use anyhow::Context;
 
-use crate::config::Config;
+use crate::{config::Config, events::AppState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     let static_dir = resolve_static_dir();
 
-    let app = api::router(pool, static_dir);
+    let app = api::router(AppState::new(pool), static_dir);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!("打开 http://{} 就能开始下棋", config.bind_addr);
 

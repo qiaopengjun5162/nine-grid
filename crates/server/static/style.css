@@ -181,6 +181,28 @@ button:disabled { cursor: default; }
 
 .actions { display: grid; gap: 10px; }
 
+/* 机器人难度：选择器和按钮并排，窄屏时自动堆叠 */
+.bot-action { display: flex; gap: 8px; align-items: stretch; }
+.bot-action .ghost { flex: 1; }
+.difficulty {
+  appearance: none;
+  padding: 10px 30px 10px 12px;
+  border: 1px solid #d8c9b2;
+  border-radius: 6px;
+  background: rgba(255, 252, 245, 0.6)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%237a6248' stroke-width='1.6'/%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.difficulty:hover { border-color: var(--rust); }
+.difficulty:focus-visible { outline: 2px solid var(--rust); outline-offset: 2px; }
+@media (max-width: 420px) {
+  .bot-action { flex-direction: column; }
+}
+
 .divider {
   display: flex;
   align-items: center;

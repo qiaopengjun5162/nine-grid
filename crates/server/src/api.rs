@@ -6,6 +6,7 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
+use nine_grid_bot::Difficulty;
 use nine_grid_core::Mark;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -48,6 +49,9 @@ struct JoinGameRequest {
 struct SeatBotRequest {
     /// 只用来算"你是谁"，并校验你是建局者
     player_id: Uuid,
+    /// 机器人难度；缺省为 hard，兼容老的前端调用
+    #[serde(default)]
+    difficulty: Difficulty,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,7 +117,7 @@ async fn seat_bot(
     Json(req): Json<SeatBotRequest>,
 ) -> Result<Json<GameView>, AppError> {
     let code = normalize_code(&code)?;
-    let game = db::seat_bot(&pool, &code, req.player_id).await?;
+    let game = db::seat_bot(&pool, &code, req.player_id, req.difficulty).await?;
     let you = game.mark_of(req.player_id);
     Ok(Json(GameView { you, game }))
 }

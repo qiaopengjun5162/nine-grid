@@ -35,7 +35,14 @@
 
       <div class="actions">
         <button id="create-btn" class="primary" type="button">开一局新棋</button>
-        <button id="bot-create-btn" class="ghost" type="button">和机器人下一盘</button>
+        <div class="bot-action">
+          <select id="bot-difficulty" class="difficulty" aria-label="机器人难度">
+            <option value="hard">困难 · 逼平为止</option>
+            <option value="medium">中等 · 少犯低级错</option>
+            <option value="easy">简单 · 能赢得动</option>
+          </select>
+          <button id="bot-create-btn" class="ghost" type="button">和机器人下一盘</button>
+        </div>
       </div>
 
       <div class="divider"><span>或凭房间码入座</span></div>

@@ -1,3 +1,4 @@
+use nine_grid_bot::Difficulty;
 use nine_grid_core::{FIRST_MARK, Game, GameState, Mark};
 use rand::Rng;
 use serde::Serialize;
@@ -63,6 +64,8 @@ pub struct GameSnapshot {
     pub winner: Option<Mark>,
     pub players: Seats,
     pub moves: Vec<MoveView>,
+    /// 机器人难度（只有 X 座位是机器人时有意义，前端据此显示档位）
+    pub bot_difficulty: Difficulty,
 }
 
 impl GameSnapshot {
@@ -83,6 +86,7 @@ struct GameRow {
     id: Uuid,
     state: GameState,
     version: i64,
+    bot_difficulty: Difficulty,
 }
 
 /// 建局：创建者执 O 先手，等待对手加入
@@ -178,7 +182,14 @@ pub async fn join_game(
 /// 让机器人坐进 X 座位。只有建局者（O 方）能邀请。
 ///
 /// 走的是和真人加入完全相同的路径：占用同一个座位、让对局进入进行中。
-pub async fn seat_bot(pool: &PgPool, code: &str, caller: Uuid) -> Result<GameSnapshot, AppError> {
+/// 难度写在这一局上，之后机器人的每一次应招都按它走 —— 中途不能改，
+/// 否则同一盘棋里机器人忽强忽弱，棋谱就没法解释了。
+pub async fn seat_bot(
+    pool: &PgPool,
+    code: &str,
+    caller: Uuid,
+    difficulty: Difficulty,
+) -> Result<GameSnapshot, AppError> {
     let mut tx = pool.begin().await?;
     let game = lock_game(&mut tx, code).await?;
 
@@ -202,12 +213,14 @@ pub async fn seat_bot(pool: &PgPool, code: &str, caller: Uuid) -> Result<GameSna
 
     sqlx::query(
         "update games
-            set state = $2, turn = $3, version = version + 1, updated_at = now()
+            set state = $2, turn = $3, bot_difficulty = $4,
+                version = version + 1, updated_at = now()
           where id = $1",
     )
     .bind(game.id)
     .bind(GameState::InProgress.as_str())
     .bind(FIRST_MARK.code())
+    .bind(difficulty.as_str())
     .execute(&mut *tx)
     .await?;
 
@@ -255,7 +268,7 @@ pub async fn play(
     if let Some(bot_mark) = bot_mark
         && !game.is_over()
         && game.turn() == bot_mark
-        && let Some(reply) = nine_grid_bot::choose_move(&game)
+        && let Some(reply) = nine_grid_bot::choose_move_with(&game, game_row.bot_difficulty)
     {
         record_move(&mut tx, game_row.id, &mut game, bot_mark, reply, BOT_ID).await?;
     }
@@ -338,6 +351,7 @@ pub async fn snapshot(pool: &PgPool, code: &str) -> Result<GameSnapshot, AppErro
         winner: nine_grid_core::winner_mark(rules.state()),
         players: load_seats(pool, game_row.id).await?,
         moves,
+        bot_difficulty: game_row.bot_difficulty,
     })
 }
 
@@ -456,9 +470,14 @@ fn row_to_game(row: &PgRow) -> Result<GameRow, AppError> {
     let state = state_text
         .parse::<GameState>()
         .map_err(|_| AppError::Internal(format!("数据库里存在未知状态 {state_text}")))?;
+    let difficulty_text: String = row.try_get("bot_difficulty")?;
+    let bot_difficulty = difficulty_text
+        .parse::<Difficulty>()
+        .map_err(|err| AppError::Internal(format!("数据库里存在未知机器人难度: {err}")))?;
     Ok(GameRow {
         id: row.try_get("id")?,
         state,
         version: row.try_get("version")?,
+        bot_difficulty,
     })
 }

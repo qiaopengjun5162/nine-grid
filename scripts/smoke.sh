@@ -98,6 +98,24 @@ check "机器人没有被击败" "true" "$([ "$STATE" != "o_won" ] && echo true 
 check "人机对局也留下完整棋谱" "$(echo "$MV" | jq -r .plies)" \
   "$(curl -s "$BASE/api/games/$SOLO_CODE/replay" | jq -r '.moves | length')"
 
+# 难度是这一局的属性：三档都能入座并回显，缺省兼容为 hard，非法值被拒
+echo "== 机器人难度 =="
+for DIFF in hard medium easy; do
+  D=$(uuidgen | tr 'A-Z' 'a-z')
+  DC=$(post /api/games "{\"player_id\":\"$D\"}" | jq -r .code)
+  DV=$(post "/api/games/$DC/bot" "{\"player_id\":\"$D\",\"difficulty\":\"$DIFF\"}")
+  check "$DIFF 档入座后回显难度" "$DIFF" "$(echo "$DV" | jq -r .bot_difficulty)"
+done
+
+DEFAULT=$(post /api/games "{\"player_id\":\"$A\"}" | jq -r .code)
+check "缺省难度兼容为 hard" "hard" \
+  "$(post "/api/games/$DEFAULT/bot" "{\"player_id\":\"$A\"}" | jq -r .bot_difficulty)"
+
+BADCODE=$(post /api/games "{\"player_id\":\"$A\"}" | jq -r .code)
+BAD_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/games/$BADCODE/bot" \
+  -H 'content-type: application/json' -d "{\"player_id\":\"$A\",\"difficulty\":\"impossible\"}")
+check "非法难度被拒" "422" "$BAD_STATUS"
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   printf '\033[32m全部 %d 项通过\033[0m\n' "$PASS"

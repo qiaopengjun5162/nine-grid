@@ -11,7 +11,7 @@
 > 三个棋子横、竖、斜连成一条直线即获胜。规则只有一句话，正好用来练「把状态机写对」这件事。
 
 当前状态：**本地版 + 链上版都已跑通** —— 建局 → 邀请 → 轮流落子 → 规则裁决 → 终局 → 棋谱回放，
-外加「一个人也能下」的完美防守机器人。本地版 33 项端到端检查、链上版 10 项真实交易测试全过。
+外加「一个人也能下」的机器人（简单 / 中等 / 困难三档）。本地版端到端检查、链上版 10 项真实交易测试全过。
 
 两个阶段共用**同一份规则代码**（`crates/core`）：本地版和 Solana 链上程序都调用它，规则只有一份。
 先做本地版再上链的理由，以及迁移时哪些代码没动，见文末。
@@ -42,6 +42,23 @@
 机器人和人类在结构上是**同一种东西**：一个占 X 座位的普通玩家。
 它落子前先问规则层 `game.after(me, pos)`，落子后再走一遍 `apply()` 校验 —— 规则只有一份，机器人不可能"开挂"。
 
+### 三档难度：共用一套搜索，只在"怎么挑"上分叉
+
+难度是**这一局的属性**（存在 `games.bot_difficulty`），邀请机器人时选定，中途不能改 ——
+否则同一盘棋里它忽强忽弱，棋谱就没法解释了。三档跑的是**同一个极小化极大搜索**，
+区别只在面对若干候选着法时怎么选：
+
+| 档位 | 策略 | 结果 |
+|---|---|---|
+| 困难 | 永远走搜索分最高的一步 | 完美防守，你最多逼平 |
+| 中等 | 只在"不输"的着法里挑，65% 走最优、35% 随机换一个平局分支 | 不犯低级错，但对手失误时它未必抓得住 |
+| 简单 | 有立即胜手 80% 抓住，其余大多随手下 | 人类有明显胜面 |
+
+关键约束：**"不输"这个判断来自搜索分（≈0 是平），不是另写一套规则。**
+三档都只是从 `scored_moves()` 给出的候选里挑，挑完照样走 `apply()` 校验，
+所以即使简单档"放水"，它落的每一步也依然是规则允许的合法棋。
+数据库默认值是 `hard`，老数据不用回填就保持原行为。
+
 ### 三条铁律
 
 1. **本地版：棋谱是唯一真相；链上版：盘面快照 + 事件是真相。**
@@ -68,7 +85,7 @@ nine-grid/
 │   ├── core/                   # 纯规则引擎，0 IO，被三个宿主共用
 │   │   └── src/lib.rs          # Board / Game / Mark / RuleError + 22 个测试
 │   ├── bot/                    # 机器人：极小化极大 + alpha-beta
-│   │   └── src/lib.rs          # 只依赖 core，9 个测试（含 200 局不败验证）
+│   │   └── src/lib.rs          # 三档难度共用一套搜索，13 个测试（含 200 局不败验证）
 │   └── server/
 │       ├── src/main.rs         # 启动、日志、优雅退出
 │       ├── src/api.rs          # 7 个路由
@@ -78,7 +95,7 @@ nine-grid/
 │       └── static/             # index.html / style.css / app.js（无构建步骤）
 ├── migrations/0001_init.sql
 ├── scripts/
-│   ├── smoke.sh                # 本地版 33 项端到端检查
+│   ├── smoke.sh                # 本地版 38 项端到端检查
 │   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试，自包含
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
@@ -124,7 +141,7 @@ waiting ──join──▶ in_progress ──三连──▶ o_won / x_won
 |---|---|---|
 | POST | `/api/games` | 建局，创建者执 O |
 | POST | `/api/games/{code}/join` | 凭 6 位房间码加入，执 X |
-| POST | `/api/games/{code}/bot` | 建局者邀请机器人坐 X（等价于一个自动加入的对手） |
+| POST | `/api/games/{code}/bot` | 建局者邀请机器人坐 X，请求体带 `difficulty`（easy/medium/hard，缺省 hard） |
 | GET | `/api/games/{code}?player_id=` | 全量局面（`you` 告诉你执什么子） |
 | POST | `/api/games/{code}/moves` | 落子 `{player_id, position, version}` |
 | GET | `/api/games/{code}/replay` | 纯棋谱，可独立重放 |
@@ -152,7 +169,7 @@ cargo run -p nine-grid-server
 
 1. 点「开一局新棋」→ 拿到 6 位房间码 + 邀请链接；
 2. 把链接发给对手（或换一个无痕窗口打开），对方自动入座执 X；
-3. 懒得找人？点「和机器人下一盘」，它执 X 跟你下，**每步都最优**（你最多逼平）；
+3. 懒得找人？选好难度点「和机器人下一盘」，它执 X 跟你下：困难档每步最优（你最多逼平），中等档少犯低级错，简单档你赢得动；
 4. 轮流点格子，非法操作会给出中文提示；
 5. 终局后展开「棋谱」能看到每一手落在哪；
 6. 杀掉服务再启动，刷新页面 —— 棋局还在（落库了）。
@@ -172,14 +189,14 @@ cargo run -p nine-grid-server
 | `test` | 26 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
 | `msrv` | `rust-version = "1.89"` 不是一句空话 | `cargo +1.89.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
-| `e2e` | **真 Postgres + 真二进制 + 33 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
+| `e2e` | **真 Postgres + 真二进制 + 38 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
 
 本地一条命令对齐 CI：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）。
 
 三个设计决定值得单独说：
 
 1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
-   所以 CI 里起一个 `postgres:17` service，跑完整个 33 项冒烟。这一步的存在感比前面五个加起来还高。
+   所以 CI 里起一个 `postgres:17` service，跑完整个 38 项冒烟。这一步的存在感比前面五个加起来还高。
 2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
    不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 现在改成 1.89 并且由 CI 看着。
 3. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
@@ -211,7 +228,7 @@ DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
 ```bash
 just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
 cargo test                       # 31 个单元测试（core 22 + bot 9）
-bash scripts/smoke.sh            # 本地版 33 项端到端检查（服务需先跑起来）
+bash scripts/smoke.sh            # 本地版 38 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
 ```
@@ -224,6 +241,8 @@ just chain-test                  # 链上端到端：验证器+部署+10 项真�
   上链后对应的是"账户还能不能被写"，必须钉死。
 - **`never_loses_against_random_play`**（bot）：200 局机器人执 O 对随机对手，一局都不许输。
   这条比"能赢"更重要 —— 它证明搜索没有漏掉防守分支。
+- **`hard_beats_easy_and_never_loses_to_medium`**（bot）：三档对下 200 局，
+  困难档对中档不落下风、对简单档净胜 —— 证明三档确实有强弱之分，不是换个名字的同一档。
 
 冒烟脚本覆盖了正常对局 + 全部拒绝分支（不是你的回合、格子被占、版本过期、非玩家、终局后落子、第三人加入……）。
 
@@ -371,8 +390,8 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 链上测试环境被沙盒坑过一次：ts-node 默认在 `$HOME` 建缓存目录，受限环境里 `mkdir` 被拒，
 报成费解的 `[ERROR] No such file or directory`。`scripts/chain-test.sh` 里用 `TS_NODE_CACHE=false` 绕开了。
 
-再往后才是可选项：战绩与排行榜、观战实时化（SSE）、多种难度的机器人（现在是满分，只会让你平），
-或者给链上版配一个能连 Phantom 的前端页面。
+再往后才是可选项：战绩与排行榜、观战实时化（SSE），或者给链上版配一个能连 Phantom 的前端页面。
+（三档难度已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。

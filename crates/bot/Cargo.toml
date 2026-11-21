@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 nine-grid-core = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
 
 [lints]
 workspace = true

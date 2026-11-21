@@ -20,6 +20,7 @@ const ui = {
   copyBtn: document.getElementById("copy-btn"),
   botBtn: document.getElementById("bot-btn"),
   botCreateBtn: document.getElementById("bot-create-btn"),
+  botDifficulty: document.getElementById("bot-difficulty"),
   seatO: document.getElementById("seat-o"),
   seatX: document.getElementById("seat-x"),
   seatOName: document.getElementById("seat-o-name"),
@@ -313,17 +314,22 @@ function render(view) {
 
 function renderSeats(view) {
   const { o, x } = view.players;
-  ui.seatOName.textContent = seatLabel(o, view.you, "O");
-  ui.seatXName.textContent = seatLabel(x, view.you, "X");
+  ui.seatOName.textContent = seatLabel(o, view.you, "O", view);
+  ui.seatXName.textContent = seatLabel(x, view.you, "X", view);
   ui.seatO.classList.toggle("active", view.state === "in_progress" && view.turn === "O");
   ui.seatX.classList.toggle("active", view.state === "in_progress" && view.turn === "X");
 }
 
-// 座位怎么显示：自己 → 你；机器人 → 机器人；真人 → 昵称或短 id
-function seatLabel(seat, you, mark) {
+const DIFFICULTY_LABEL = { easy: "简单", medium: "中等", hard: "困难" };
+
+// 座位怎么显示：自己 → 你；机器人 → 机器人（带档位）；真人 → 昵称或短 id
+function seatLabel(seat, you, mark, view) {
   if (!seat) return "待入座";
   if (you === mark) return "你";
-  if (seat.is_bot) return "机器人";
+  if (seat.is_bot) {
+    const label = DIFFICULTY_LABEL[view.bot_difficulty] ?? view.bot_difficulty;
+    return `机器人 · ${label}`;
+  }
   return seat.handle || shortId(seat.id);
 }
 
@@ -504,12 +510,14 @@ async function seatBot() {
   if (!state.room) return;
   ui.botBtn.disabled = true;
   try {
+    const difficulty = ui.botDifficulty?.value ?? "hard";
     const view = await api(`/api/games/${encodeURIComponent(state.room)}/bot`, {
       method: "POST",
-      body: { player_id: state.playerId },
+      body: { player_id: state.playerId, difficulty },
     });
     render(view);
-    toast("机器人执 X 入座，你先走");
+    const label = { easy: "简单", medium: "中等", hard: "困难" }[difficulty] ?? difficulty;
+    toast(`机器人（${label}）执 X 入座，你先走`);
   } catch (err) {
     toast(err.message);
   } finally {

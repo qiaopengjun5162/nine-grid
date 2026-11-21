@@ -8,6 +8,8 @@
 //! 服务端把它当成一个坐进 X 座位的普通对手，落子一样要过 `apply()` 的校验。
 
 use nine_grid_core::{Game, GameState, Mark, winner_mark};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 /// 胜负分值基数。必须远大于最大手数（9），保证"任何胜利"都强于"平局"，
 /// "任何失败"都劣于"平局"。在这个前提下再去调整「早赢 / 晚输」。
@@ -86,46 +88,139 @@ fn search(game: &Game, me: Mark, mut alpha: i32, mut beta: i32) -> i32 {
     }
 }
 
-/// 给当前该落子的一方选一步。返回格子编号。
+/// 机器人难度。
 ///
-/// 返回 `None` 的三种情况：对局已结束、还在等人加入、棋盘已满。
-#[must_use]
-pub fn choose_move(game: &Game) -> Option<u8> {
+/// 三档共用同一套极小化极大搜索与同一份规则层，区别只在「如何挑着法」：
+/// - `Hard`：永远走最高分（完美防守，井字棋里只能逼平）；
+/// - `Medium`：只在「不输」的着法里挑，多数时候走最优、偶尔换个次优 —— 不犯低级错误，但不好赢；
+/// - `Easy`：有立即胜手就大概率抓住，其余时候大多随手下 —— 人类有明显胜面。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Difficulty {
+    Easy,
+    Medium,
+    #[default]
+    Hard,
+}
+
+impl Difficulty {
+    /// 存进数据库用的是这套小写名字，和 serde 的 `snake_case` 保持一致
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Easy => "easy",
+            Self::Medium => "medium",
+            Self::Hard => "hard",
+        }
+    }
+}
+
+impl std::str::FromStr for Difficulty {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "easy" => Ok(Self::Easy),
+            "medium" => Ok(Self::Medium),
+            "hard" => Ok(Self::Hard),
+            other => Err(format!("未知的机器人难度: {other}")),
+        }
+    }
+}
+
+/// 列出当前局面每个合法着法的搜索分。分数含义见 [`evaluate`]。
+fn scored_moves(game: &Game, me: Mark) -> Vec<(i32, u8)> {
+    legal_moves(game)
+        .into_iter()
+        .filter_map(|position| {
+            let next = game.after(me, position).ok()?;
+            Some((search(&next, me, i32::MIN, i32::MAX), position))
+        })
+        .collect()
+}
+
+/// 从候选里挑最高分；同分时偏好中心（和原来的手感一致）。
+fn best(scored: &[(i32, u8)]) -> Option<u8> {
+    scored
+        .iter()
+        .max_by(|left, right| {
+            left.0.cmp(&right.0).then_with(|| {
+                tie_break_weight(usize::from(left.1)).cmp(&tie_break_weight(usize::from(right.1)))
+            })
+        })
+        .map(|&(_, position)| position)
+}
+
+/// 可注入随机源的选步入口，方便测试里用固定种子复现。
+pub fn choose_move_with_rng<R: Rng + ?Sized>(
+    game: &Game,
+    difficulty: Difficulty,
+    rng: &mut R,
+) -> Option<u8> {
     if game.state() != GameState::InProgress {
         return None;
     }
 
     let me = game.turn();
-    let mut best: Option<(i32, u8)> = None;
-
-    for position in legal_moves(game) {
-        let Ok(next) = game.after(me, position) else {
-            continue;
-        };
-        let score = search(&next, me, i32::MIN, i32::MAX);
-
-        // 分数更高就换；分数相同时用"更靠近中心"的那一步
-        let better = match best {
-            None => true,
-            Some((best_score, best_position)) => {
-                score > best_score
-                    || (score == best_score
-                        && tie_break_weight(usize::from(position))
-                            > tie_break_weight(usize::from(best_position)))
-            }
-        };
-        if better {
-            best = Some((score, position));
-        }
+    let scored = scored_moves(game, me);
+    if scored.is_empty() {
+        return None;
     }
 
-    best.map(|(_, position)| position)
+    let pick = match difficulty {
+        Difficulty::Hard => best(&scored)?,
+        Difficulty::Medium => {
+            // 「不输」= 即使对手完美应对也能保住平局。这一步是 Medium 的底线：
+            // 它不会主动把自己走死，但在都是平局的分支里会随机换着法，
+            // 所以对手不完美时它并不会像 Hard 那样每次都抓住机会。
+            let safe: Vec<(i32, u8)> =
+                scored.iter().copied().filter(|(score, _)| *score >= 0).collect();
+            let pool = if safe.is_empty() {
+                &scored[..]
+            } else {
+                &safe[..]
+            };
+            if rng.gen_bool(0.65) {
+                best(pool)?
+            } else {
+                pool[rng.gen_range(0..pool.len())].1
+            }
+        }
+        Difficulty::Easy => {
+            // 立即胜手（分值接近 WIN）大概率抓住，显得不是纯瞎下；
+            // 其余时候只有两成走最优，八成从所有合法点里随手挑 —— 这样才赢得动它。
+            let winning: Vec<(i32, u8)> =
+                scored.iter().copied().filter(|(score, _)| *score >= WIN - 9).collect();
+            if !winning.is_empty() && rng.gen_bool(0.8) {
+                best(&winning)?
+            } else if rng.gen_bool(0.25) {
+                best(&scored)?
+            } else {
+                scored[rng.gen_range(0..scored.len())].1
+            }
+        }
+    };
+
+    Some(pick)
+}
+
+/// 按难度选一步。返回 `None` 的三种情况：对局已结束、还在等人加入、棋盘已满。
+#[must_use]
+pub fn choose_move_with(game: &Game, difficulty: Difficulty) -> Option<u8> {
+    choose_move_with_rng(game, difficulty, &mut rand::thread_rng())
+}
+
+/// 完美难度（困难档），也是历史入口 —— 保留它让老调用方一行不用改。
+#[must_use]
+pub fn choose_move(game: &Game) -> Option<u8> {
+    choose_move_with(game, Difficulty::Hard)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use nine_grid_core::RuleError;
+    use rand::SeedableRng;
 
     /// 按给定顺序摆出一个局面（O 先手，所以序列必须 O/X 交替）
     fn game_from(moves: &[(Mark, u8)]) -> Game {
@@ -252,6 +347,86 @@ mod tests {
         // 机器人本身不做校验，全靠 core 兜底：给它一个越界位置也只能报错
         let game = game_from(&[]);
         assert_eq!(game.after(Mark::O, 42), Err(RuleError::OutOfRange));
+    }
+
+    #[test]
+    fn every_difficulty_returns_a_legal_move() {
+        // 三档在任何进行中的局面里都只能走合法点，且换难度不会让机器人卡住
+        let game = game_from(&[(Mark::O, 4), (Mark::X, 0), (Mark::O, 8), (Mark::X, 2)]);
+        for difficulty in [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard] {
+            for _ in 0..20 {
+                let pos = choose_move_with_rng(&game, difficulty, &mut rand::thread_rng())
+                    .expect("进行中的局面必须有棋可下");
+                assert!(game.board().is_empty_at(usize::from(pos)));
+                assert!(game.after(game.turn(), pos).is_ok());
+            }
+        }
+    }
+
+    #[test]
+    fn hard_takes_the_win_and_blocks_the_loss() {
+        // 困难档必须抓住立即胜手，也必须堵住立即败点
+        let winning = game_from(&[(Mark::O, 0), (Mark::X, 4), (Mark::O, 1), (Mark::X, 8)]);
+        assert_eq!(choose_move(&winning), Some(2));
+
+        let blocking = game_from(&[(Mark::O, 4), (Mark::X, 0), (Mark::O, 8), (Mark::X, 2)]);
+        assert_eq!(choose_move(&blocking), Some(1));
+    }
+
+    #[test]
+    fn easy_takes_an_immediate_win_most_of_the_time() {
+        // 简单档不是纯随机：面对唾手可得的胜手，八成会走它。
+        let winning = game_from(&[(Mark::O, 0), (Mark::X, 4), (Mark::O, 1), (Mark::X, 8)]);
+        let mut seed: u64 = 0xE1A5_1234;
+        let mut hits = 0;
+        for _ in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            seed = seed.wrapping_add(1);
+            if choose_move_with_rng(&winning, Difficulty::Easy, &mut rng) == Some(2) {
+                hits += 1;
+            }
+        }
+        assert!(
+            hits > 140,
+            "简单档大概率该抓住胜手，200 次里只中了 {hits} 次"
+        );
+    }
+
+    /// 让两档对下，返回 `hard` 的净胜局数（胜 -1、负 +1 视角反过来记）
+    fn hard_vs(difficulty: Difficulty, games: u32, seed: u64) -> i32 {
+        let mut seed = seed;
+        let mut hard_score = 0;
+        for _ in 0..games {
+            let mut game = Game::waiting();
+            game.start().unwrap();
+            while !game.is_over() {
+                let turn = game.turn();
+                // 固定 O 为 Hard，另一档为 X，用同一个种子流驱动随机档
+                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+                seed = seed.wrapping_add(1);
+                let pos = if turn == Mark::O {
+                    choose_move_with_rng(&game, Difficulty::Hard, &mut rng)
+                } else {
+                    choose_move_with_rng(&game, difficulty, &mut rng)
+                }
+                .expect("进行中必须有棋可下");
+                game.apply(turn, pos).unwrap();
+            }
+            match game.state() {
+                GameState::OWon => hard_score += 1,
+                GameState::XWon => hard_score -= 1,
+                GameState::Draw | GameState::Waiting | GameState::InProgress => {}
+            }
+        }
+        hard_score
+    }
+
+    #[test]
+    fn hard_beats_easy_and_never_loses_to_medium() {
+        // 井字棋完美对完美只能平，所以 Hard 对 Medium 最多打平，绝不会输；
+        // 对 Easy 则应该能稳赢若干局 —— 这正好证明三档真的有强弱之分。
+        assert!(hard_vs(Difficulty::Medium, 200, 0x0000_D1F1) >= 0);
+        assert!(hard_vs(Difficulty::Easy, 200, 0x0000_EA5E) > 0);
     }
 
     #[test]

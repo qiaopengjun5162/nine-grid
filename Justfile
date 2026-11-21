@@ -44,3 +44,11 @@ msrv:
 # 端到端冒烟：需要服务已经在跑
 smoke:
     bash scripts/smoke.sh
+
+# 链上端到端：本地验证器 + 部署 + TS 测试（自包含，自动清理）
+chain-test:
+    bash scripts/chain-test.sh
+
+# 链上 Rust 单测（含 19683 棋盘一致性，不需要验证器）
+chain-unit:
+    cd chain && cargo test-sbf -p nine-grid

@@ -160,6 +160,38 @@ impl Board {
     pub fn cells(&self) -> &[Option<Mark>; CELLS] {
         &self.0
     }
+
+    /// 从存储层的定长编码还原棋盘（0 = 空, 1 = O, 2 = X）。
+    ///
+    /// 存在意义：链上账户与数据库里棋盘都是 `[u8; 9]` 这种紧凑编码，
+    /// 而规则层用 `Option<Mark>` 表达「空」。这个方法是两者之间唯一的翻译口，
+    /// 保证规则层永远不需要知道存储格式长什么样。
+    pub fn from_codes(codes: &[u8; CELLS]) -> Result<Self, RuleError> {
+        let mut cells = [None; CELLS];
+        for (index, &code) in codes.iter().enumerate() {
+            cells[index] = match code {
+                0 => None,
+                1 => Some(Mark::O),
+                2 => Some(Mark::X),
+                _ => return Err(RuleError::InvalidCellCode),
+            };
+        }
+        Ok(Self(cells))
+    }
+
+    /// 转换成存储层的定长编码（`from_codes` 的逆操作）
+    #[must_use]
+    pub fn to_codes(&self) -> [u8; CELLS] {
+        let mut codes = [0; CELLS];
+        for (index, cell) in self.0.iter().enumerate() {
+            codes[index] = match cell {
+                Some(Mark::O) => 1,
+                Some(Mark::X) => 2,
+                None => 0,
+            };
+        }
+        codes
+    }
 }
 
 /// 对局状态机
@@ -194,6 +226,34 @@ impl GameState {
             Self::OWon => "o_won",
             Self::XWon => "x_won",
             Self::Draw => "draw",
+        }
+    }
+
+    /// 链上账户用的单字节编码，顺序与 Anchor 枚举变体一致。
+    ///
+    /// 与 `as_str` 是同一个状态机的两种投影：数据库存字符串（可读），
+    /// 链上存 u8（省空间）。两者都从这一个枚举派生，不会各写一份。
+    #[must_use]
+    pub const fn to_code(self) -> u8 {
+        match self {
+            Self::Waiting => 0,
+            Self::InProgress => 1,
+            Self::OWon => 2,
+            Self::XWon => 3,
+            Self::Draw => 4,
+        }
+    }
+
+    /// 从链上单字节编码还原，非法值返回 `None`
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Waiting),
+            1 => Some(Self::InProgress),
+            2 => Some(Self::OWon),
+            3 => Some(Self::XWon),
+            4 => Some(Self::Draw),
+            _ => None,
         }
     }
 }
@@ -243,6 +303,12 @@ pub enum RuleError {
     /// 数据库里读到了未知状态
     #[error("未知的对局状态")]
     UnknownState,
+    /// 存储层的格子编码非法（不是 0/1/2），只可能来自损坏的数据
+    #[error("非法的格子编码")]
+    InvalidCellCode,
+    /// 账户字段之间自相矛盾（比如状态说获胜、棋盘却没三连）
+    #[error("对局数据自相矛盾")]
+    InconsistentState,
 }
 
 impl RuleError {
@@ -257,6 +323,8 @@ impl RuleError {
             Self::OutOfRange => "out_of_range",
             Self::AlreadyStarted => "already_started",
             Self::UnknownState => "unknown_state",
+            Self::InvalidCellCode => "invalid_cell_code",
+            Self::InconsistentState => "inconsistent_state",
         }
     }
 }
@@ -304,6 +372,45 @@ impl Game {
             game.apply(mark, position)?;
         }
         Ok(game)
+    }
+
+    /// 从存储层的字段还原一局棋，供链上账户 / 数据库记录使用。
+    ///
+    /// 与 [`Self::replay_with`] 的区别：链上账户直接存盘面快照而不是逐手棋谱，
+    /// 所以需要从 `(board, turn, state, plies)` 四个字段重建状态机。
+    /// 这里会校验字段之间的**一致性**——例如状态说 O 获胜，棋盘上就必须真有三连——
+    /// 这样即使有人伪造账户数据，规则层也不会跟着说谎。
+    pub fn restore(
+        board: Board,
+        turn: Mark,
+        state: GameState,
+        plies: u8,
+    ) -> Result<Self, RuleError> {
+        let placed = board.cells().iter().filter(|cell| cell.is_some()).count();
+        if placed != usize::from(plies) {
+            return Err(RuleError::InconsistentState);
+        }
+
+        // 注意：不能从 plies 反推 Waiting / InProgress —— 两个玩家都已入座、
+        // 但一手未下时 plies 也是 0。这个区别存在 state 里，棋盘看不出来。
+        // 所以这里只校验 state 与「棋盘上真有几连」不矛盾。
+        let winner = board.winner();
+        let consistent = match state {
+            GameState::OWon => winner == Some(Mark::O),
+            GameState::XWon => winner == Some(Mark::X),
+            GameState::Draw => winner.is_none() && board.is_full(),
+            GameState::Waiting | GameState::InProgress => winner.is_none(),
+        };
+        if !consistent {
+            return Err(RuleError::InconsistentState);
+        }
+
+        Ok(Self {
+            board,
+            turn,
+            state,
+            plies,
+        })
     }
 
     /// 第二个玩家加入，开局
@@ -686,7 +793,71 @@ mod tests {
             GameState::Draw,
         ] {
             assert_eq!(state.as_str().parse::<GameState>(), Ok(state));
+            assert_eq!(GameState::from_code(state.to_code()), Some(state));
         }
         assert_eq!("bogus".parse::<GameState>(), Err(RuleError::UnknownState));
+        assert_eq!(GameState::from_code(5), None);
+        assert_eq!(GameState::from_code(255), None);
+    }
+
+    #[test]
+    fn board_codes_round_trip() {
+        let codes = [0, 1, 2, 1, 0, 2, 0, 0, 1];
+        let board = Board::from_codes(&codes).unwrap();
+        assert_eq!(board.to_codes(), codes);
+        // 非法编码
+        let mut bad = codes;
+        bad[3] = 7;
+        assert_eq!(Board::from_codes(&bad), Err(RuleError::InvalidCellCode));
+    }
+
+    #[test]
+    fn board_codes_and_winner_agree_with_mark_codes() {
+        // O 走 0-1-2 三连
+        let codes = [1, 1, 1, 0, 2, 2, 0, 0, 0];
+        let board = Board::from_codes(&codes).unwrap();
+        assert_eq!(board.winner(), Some(Mark::O));
+        assert_eq!(board.cells()[4], Some(Mark::X));
+    }
+
+    #[test]
+    fn restore_rebuilds_a_playable_game() {
+        // 还原一个进行中的局面，然后接着下完它
+        let codes = [1, 0, 0, 2, 1, 0, 0, 0, 0];
+        let board = Board::from_codes(&codes).unwrap();
+        let mut game = Game::restore(board, Mark::X, GameState::InProgress, 3).unwrap();
+
+        // O 的回合：O 落 2 → 0-1-2? 不，O 在 0 和 4；X 在 3
+        // 让 O 落 8，再 X 落 2，O 落 5 —— 只需验证 apply 能继续工作
+        game.apply(Mark::X, 2).unwrap(); // X 落 2
+        assert_eq!(game.plies(), 4);
+        assert_eq!(game.turn(), Mark::O);
+    }
+
+    #[test]
+    fn restore_rejects_contradictory_account_fields() {
+        let empty = Board::empty();
+        // 空棋盘却声称 O 获胜
+        assert_eq!(
+            Game::restore(empty.clone(), Mark::O, GameState::OWon, 0),
+            Err(RuleError::InconsistentState)
+        );
+        // 落子数与棋盘不符
+        assert_eq!(
+            Game::restore(empty.clone(), Mark::O, GameState::Waiting, 3),
+            Err(RuleError::InconsistentState)
+        );
+        // 两人已入座、一手未下 —— 这是合法的（空棋谱 + InProgress）
+        assert!(Game::restore(empty, Mark::O, GameState::InProgress, 0).is_ok());
+    }
+
+    #[test]
+    fn restored_game_winner_frees_turn() {
+        let codes = [1, 1, 1, 2, 2, 0, 0, 0, 0];
+        let board = Board::from_codes(&codes).unwrap();
+        let mut game = Game::restore(board.clone(), Mark::O, GameState::OWon, 5).unwrap();
+        assert_eq!(game.state(), GameState::OWon);
+        assert_eq!(game.turn(), Mark::O, "终局后 turn 保持获胜方");
+        assert_eq!(game.apply(Mark::X, 8), Err(RuleError::GameOver));
     }
 }

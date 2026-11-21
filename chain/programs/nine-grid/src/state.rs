@@ -1,5 +1,9 @@
 use anchor_lang::prelude::*;
 
+pub use nine_grid_core::{
+    Board, CELLS, FIRST_MARK, GameState as CoreState, Mark, RuleError, WIN_LINES,
+};
+
 /// 格子为空
 pub const EMPTY: u8 = 0;
 /// 先手方（O 方），同时也是对局的创建者、租金的支付者
@@ -7,35 +11,12 @@ pub const MARK_O: u8 = 1;
 /// 后手方（X 方）
 pub const MARK_X: u8 = 2;
 
-/// 九宫棋的 8 条获胜线路（3 行 + 3 列 + 2 条对角线）。
+/// 对局状态机（链上账户的存储投影）。
 ///
-/// 索引与棋盘一一对应：
-/// ```text
-///   0 | 1 | 2
-///  ---+---+---
-///   3 | 4 | 5
-///  ---+---+---
-///   6 | 7 | 8
-/// ```
-/// 故意写成常量数组 + 固定 8 次比较，而不是"遍历所有格子找连续三个"，
-/// 这样链上计算量是固定的、可预测的（见 README「计算单元」一节）。
-pub const WIN_LINES: [[usize; 3]; 8] = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6],
-];
-
-/// 对局状态机
-///
-/// ```text
-/// WaitingForOpponent --join_game--> InProgress --play(获胜)--> OWon / XWon
-///                                              --play(下满)--> Draw
-/// ```
+/// 变体顺序与 [`nine_grid_core::GameState::to_code`] 严格一致：
+/// Waiting=0, InProgress=1, OWon=2, XWon=3, Draw=4。
+/// 这里保留 Anchor 派生是为了让 IDL 和前端能读到可读的枚举名；
+/// 真正的状态转换规则住在 core，不在本文件。
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum GameState {
     /// 已创建，等待对手加入
@@ -55,22 +36,28 @@ impl GameState {
         matches!(self, GameState::OWon | GameState::XWon | GameState::Draw)
     }
 
+    /// 转成 core 的状态枚举，交给规则层判定
+    #[must_use]
+    pub const fn to_core(self) -> CoreState {
+        match self {
+            Self::WaitingForOpponent => CoreState::Waiting,
+            Self::InProgress => CoreState::InProgress,
+            Self::OWon => CoreState::OWon,
+            Self::XWon => CoreState::XWon,
+            Self::Draw => CoreState::Draw,
+        }
+    }
+
     /// 前端展示用的短标签
     pub fn label(&self) -> &'static str {
-        match self {
-            GameState::WaitingForOpponent => "等待对手",
-            GameState::InProgress => "进行中",
-            GameState::OWon => "O 方获胜",
-            GameState::XWon => "X 方获胜",
-            GameState::Draw => "平局",
-        }
+        self.to_core().as_str()
     }
 }
 
 /// 一局九宫棋的完整链上状态。
 ///
 /// 所有字段都是定长的，所以空间可以在编译期算出来（`Game::INIT_SPACE`），
-/// 不需要 `realloc`，也不会因为字符串之类的变长字段产生额外租金。
+/// 不需要 `realloc`。账户布局 101 字节，与冻结版完全一致 —— 老账户可直接读。
 #[account]
 #[derive(InitSpace)]
 pub struct Game {
@@ -106,25 +93,36 @@ impl Game {
         }
     }
 
-    /// 判断胜负：固定 8 次比较，命中即返回获胜方的棋子标记
-    pub fn judge(&self) -> Option<u8> {
-        judge(&self.board)
+    /// 把账户字段还原成 core 的规则状态机，供指令里调用 `apply`。
+    ///
+    /// 规则判定只有 core 一份；这里只负责「链上存储格式 → 规则层」的翻译和一致性校验。
+    pub fn to_rules(&self) -> std::result::Result<nine_grid_core::Game, RuleError> {
+        let board = Board::from_codes(&self.board)?;
+        let turn = Mark::from_code(i16::from(self.turn)).ok_or(RuleError::InconsistentState)?;
+        nine_grid_core::Game::restore(board, turn, self.state.to_core(), self.moves)
     }
-}
 
-/// 纯函数版胜负判定，方便单独做单元测试。
-/// 没有动态遍历，最多 8 次三格比较。
-pub fn judge(board: &[u8; 9]) -> Option<u8> {
-    let mut i = 0;
-    while i < WIN_LINES.len() {
-        let [a, b, c] = WIN_LINES[i];
-        let mark = board[a];
-        if mark != EMPTY && mark == board[b] && mark == board[c] {
-            return Some(mark);
-        }
-        i += 1;
+    /// 把 core 规则状态机算出的结果写回账户字段
+    pub fn apply_rules(&mut self, rules: &nine_grid_core::Game) {
+        self.board = rules.board().to_codes();
+        self.turn = rules.turn().code() as u8;
+        self.state = match rules.state() {
+            CoreState::Waiting => GameState::WaitingForOpponent,
+            CoreState::InProgress => GameState::InProgress,
+            CoreState::OWon => GameState::OWon,
+            CoreState::XWon => GameState::XWon,
+            CoreState::Draw => GameState::Draw,
+        };
+        self.moves = rules.plies();
     }
-    None
+
+    /// 判胜：委托 core，账户这边不再自己遍历 WIN_LINES
+    pub fn judge(&self) -> Option<u8> {
+        Board::from_codes(&self.board)
+            .ok()
+            .and_then(|board| board.winner())
+            .map(|mark| mark.code() as u8)
+    }
 }
 
 #[cfg(test)]
@@ -134,40 +132,64 @@ mod tests {
     /// 账户布局变化时，这个测试会第一时间炸掉，提醒同步改前端解码
     #[test]
     fn game_space_layout_is_stable() {
-        // 8 (discriminator) + 32 + 32 + 9 + 1 + 1 + 8 + 1 + 8 + 1
         assert_eq!(8 + Game::INIT_SPACE, 101);
     }
 
-    fn board(cells: [u8; 9]) -> [u8; 9] {
-        cells
+    /// 链上枚举顺序必须与 core 的 to_code 一致，否则 to_rules / apply_rules 会错位
+    #[test]
+    fn state_enum_matches_core_codes() {
+        assert_eq!(GameState::WaitingForOpponent.to_core().to_code(), 0);
+        assert_eq!(GameState::InProgress.to_core().to_code(), 1);
+        assert_eq!(GameState::OWon.to_core().to_code(), 2);
+        assert_eq!(GameState::XWon.to_core().to_code(), 3);
+        assert_eq!(GameState::Draw.to_core().to_code(), 4);
     }
 
+    /// 链上 judge 与 core 判胜在全部 3^9 棋盘上一致。
+    /// 因为 judge 直接委托 core，这条测试实际在守「编码往返不丢信息」。
     #[test]
-    fn detects_all_eight_win_lines() {
-        for line in WIN_LINES {
-            let mut b = board([EMPTY; 9]);
-            for cell in line {
-                b[cell] = MARK_X;
+    fn judge_matches_core_on_all_19683_boards() {
+        for mask in 0..3_usize.pow(CELLS as u32) {
+            let mut codes = [EMPTY; CELLS];
+            let mut rest = mask;
+            for code in &mut codes {
+                *code = (rest % 3) as u8;
+                rest /= 3;
             }
-            assert_eq!(judge(&b), Some(MARK_X), "漏判了 {:?}", line);
+            let expected = Board::from_codes(&codes).unwrap().winner().map(|m| m.code() as u8);
+
+            let game = Game {
+                player_o: Pubkey::default(),
+                player_x: Pubkey::default(),
+                board: codes,
+                turn: MARK_O,
+                state: GameState::InProgress,
+                game_id: 0,
+                moves: codes.iter().filter(|&&c| c != EMPTY).count() as u8,
+                created_at: 0,
+                bump: 0,
+            };
+            assert_eq!(game.judge(), expected, "第 {mask} 种棋盘判胜不一致");
         }
     }
 
     #[test]
     fn empty_and_full_boards_have_no_winner() {
-        assert_eq!(judge(&board([EMPTY; 9])), None);
-        // 经典平局局面：
-        //   X O X
-        //   X O O
-        //   O X X
-        let draw = board([MARK_X, MARK_O, MARK_X, MARK_X, MARK_O, MARK_O, MARK_O, MARK_X, MARK_X]);
-        assert_eq!(judge(&draw), None);
-    }
-
-    #[test]
-    fn mixed_marks_do_not_win() {
-        let b = board([MARK_O, MARK_O, MARK_X, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY]);
-        assert_eq!(judge(&b), None);
+        let mut g = Game {
+            player_o: Pubkey::default(),
+            player_x: Pubkey::default(),
+            board: [EMPTY; 9],
+            turn: MARK_O,
+            state: GameState::WaitingForOpponent,
+            game_id: 0,
+            moves: 0,
+            created_at: 0,
+            bump: 0,
+        };
+        assert_eq!(g.judge(), None);
+        // 经典平局局面
+        g.board = [MARK_X, MARK_O, MARK_X, MARK_X, MARK_O, MARK_O, MARK_O, MARK_X, MARK_X];
+        assert_eq!(g.judge(), None);
     }
 
     #[test]

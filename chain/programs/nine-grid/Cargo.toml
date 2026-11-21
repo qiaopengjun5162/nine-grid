@@ -22,6 +22,7 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "0.32.1"
+nine-grid-core = { path = "../../../crates/core" }
 
 
 [lints.rust]

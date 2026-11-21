@@ -17,7 +17,8 @@ pub mod errors;
 pub mod state;
 
 use errors::NineGridError;
-use state::{Game, GameState, EMPTY, MARK_O, MARK_X};
+use nine_grid_core::{Game as Rules, Mark};
+use state::{EMPTY, Game, GameState, MARK_O};
 
 declare_id!("AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6");
 
@@ -77,49 +78,23 @@ pub mod nine_grid {
         Ok(())
     }
 
-    /// 在 `position`（0-8）落子。会校验轮次、占位，并当场判定胜负/平局。
+    /// 在 `position`（0-8）落子。
+    ///
+    /// 身份校验（是不是参与者）是链特有的，留在合约里；
+    /// 轮次、占位、越界、判胜、终局冻结全部交给 core 的 `Game::apply`——
+    /// 与本地版服务端走的是同一段代码，不存在第二份规则。
     pub fn play(ctx: Context<Play>, position: u8) -> Result<()> {
-        require!(position < 9, NineGridError::InvalidPosition);
-
         let game = &mut ctx.accounts.game;
         let player = ctx.accounts.player.key();
 
-        require!(
-            game.state == GameState::InProgress,
-            if game.state == GameState::WaitingForOpponent {
-                NineGridError::GameNotStarted
-            } else {
-                NineGridError::GameAlreadyOver
-            }
-        );
-
-        // 只有参与者能下棋，且必须轮到自己的颜色
+        // 链特有的身份校验：钱包必须是这局的 O 或 X
         let mark = game.mark_of(&player).ok_or(NineGridError::NotAPlayer)?;
-        require!(mark == game.turn, NineGridError::NotYourTurn);
+        let core_mark = Mark::from_code(i16::from(mark)).ok_or(NineGridError::InconsistentState)?;
 
-        let idx = position as usize;
-        require!(game.board[idx] == EMPTY, NineGridError::CellOccupied);
-
-        game.board[idx] = mark;
-        game.moves += 1;
-
-        match game.judge() {
-            // 有人三连：直接终局，不再换手
-            Some(winner) => {
-                game.state = if winner == MARK_O {
-                    GameState::OWon
-                } else {
-                    GameState::XWon
-                };
-            }
-            // 没人三连：格子满了就是平局，否则换手
-            None if game.moves == 9 => {
-                game.state = GameState::Draw;
-            }
-            None => {
-                game.turn = if mark == MARK_O { MARK_X } else { MARK_O };
-            }
-        }
+        // 账户 → 规则状态机（含一致性校验），落子，再算出的新状态写回账户
+        let mut rules: Rules = game.to_rules().map_err(NineGridError::from)?;
+        rules.apply(core_mark, position).map_err(NineGridError::from)?;
+        game.apply_rules(&rules);
 
         emit!(MovePlayed {
             game: game.key(),

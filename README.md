@@ -10,39 +10,45 @@
 
 > 三个棋子横、竖、斜连成一条直线即获胜。规则只有一句话，正好用来练「把状态机写对」这件事。
 
-当前状态：**阶段 A1 已完成，并带了一个机器人对手** —— 建局 → 邀请 → 轮流落子 → 规则裁决 → 终局 → 棋谱回放，
-外加「一个人也能下」的完美防守机器人，全链路可跑，33 项端到端检查通过。
+当前状态：**本地版 + 链上版都已跑通** —— 建局 → 邀请 → 轮流落子 → 规则裁决 → 终局 → 棋谱回放，
+外加「一个人也能下」的完美防守机器人。本地版 33 项端到端检查、链上版 10 项真实交易测试全过。
 
-上链（Solana + Anchor）是下一步，不是起点。原因和迁移路径见文末。
+两个阶段共用**同一份规则代码**（`crates/core`）：本地版和 Solana 链上程序都调用它，规则只有一份。
+先做本地版再上链的理由，以及迁移时哪些代码没动，见文末。
 
 ---
 
-## 一、架构：一个引擎，两个宿主
+## 一、架构：一个引擎，三个宿主
 
 ```text
                       ┌──────────────────────────────┐
                       │  nine-grid-core（纯规则）      │
                       │  无 HTTP · 无 DB · 无链        │
-                      └───────▲──────────────▲───────┘
-                    apply()   │              │   after()
-              ┌───────────────┴────┐   ┌─────┴──────────────┐
-              │ nine-grid-server   │──▶│ nine-grid-bot      │
-              │ axum + Postgres    │   │ 极小化极大搜索      │
-              └─────────┬──────────┘   └────────────────────┘
-                        │ JSON
-                 浏览器（原生 JS，无构建）
+                      └───▲──────────▲──────────▲────┘
+                apply()   │          │          │  to_rules()/apply()
+          ┌───────────────┴──┐  ┌────┴──────┐  ┌┴──────────────────┐
+          │ nine-grid-server │─▶│   bot     │  │ nine-grid (Anchor)│
+          │ axum + Postgres  │  │ 极小化极大 │  │ Solana 链上程序    │
+          └────────┬─────────┘  └───────────┘  └─────────┬─────────┘
+                   │ JSON                                │ PDA 账户
+            浏览器（原生 JS）                        Phantom / 钱包
 ```
 
-规则层**不知道**自己跑在哪。阶段 B 到来时，Anchor 程序只是第三个调用方，`judge` / `apply` 可以原样搬过去。
+规则层**不知道**自己跑在哪 —— 三个宿主调用的是同一个 `Game::apply`。
+链上程序负责钱包身份、PDA、签名与事件；判胜、轮次、终局冻结一律委托 core。
+`core` 为此只多了几个「存储格式 ↔ 规则状态」的桥接方法（`Board::from_codes`、`Game::restore`），
+没有引入任何链上依赖 —— 它依旧零 IO。
 
 机器人和人类在结构上是**同一种东西**：一个占 X 座位的普通玩家。
 它落子前先问规则层 `game.after(me, pos)`，落子后再走一遍 `apply()` 校验 —— 规则只有一份，机器人不可能"开挂"。
 
 ### 三条铁律
 
-1. **棋谱是唯一真相，棋盘是投影。**
-   数据库里没有 `board` 字段，只有 `moves` 序列。局面任何时候都由 `Game::replay` 重算。
-   这不只是洁癖 —— 它跟区块链 event log 是同一个模型，迁移时不用改结构，而且天然带「回放」。
+1. **本地版：棋谱是唯一真相；链上版：盘面快照 + 事件是真相。**
+   数据库里没有 `board` 字段，只有 `moves` 序列，局面由 `Game::replay` 重算，天然带「回放」。
+   链上因为账户空间按字节计费、且每笔落子本来就发 `MovePlayed` 事件，所以账户存 9 格盘面快照，
+   棋谱由事件拼出来。两种存储走的是**同一个规则状态机**：本地用 `replay`，链上用 `restore`
+   从快照还原后再 `apply`。存法不同，规则一致。
 
 2. **服务端权威，客户端只发意图。**
    前端只发 `{position: 4}`，不自己判胜负、不自己切轮次。它连"能不能点"都来自服务端返回的 `turn`。
@@ -59,8 +65,8 @@
 ```text
 nine-grid/
 ├── crates/
-│   ├── core/                   # 纯规则引擎，0 IO
-│   │   └── src/lib.rs          # Board / Game / Mark / RuleError + 17 个测试
+│   ├── core/                   # 纯规则引擎，0 IO，被三个宿主共用
+│   │   └── src/lib.rs          # Board / Game / Mark / RuleError + 22 个测试
 │   ├── bot/                    # 机器人：极小化极大 + alpha-beta
 │   │   └── src/lib.rs          # 只依赖 core，9 个测试（含 200 局不败验证）
 │   └── server/
@@ -71,7 +77,14 @@ nine-grid/
 │       ├── src/config.rs
 │       └── static/             # index.html / style.css / app.js（无构建步骤）
 ├── migrations/0001_init.sql
-├── scripts/smoke.sh            # 33 项端到端检查
+├── scripts/
+│   ├── smoke.sh                # 本地版 33 项端到端检查
+│   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试，自包含
+├── chain/                      # Solana + Anchor 链上程序（已接入 core）
+│   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
+│   │   └── src/{lib,state,errors}.rs
+│   ├── Anchor.toml
+│   └── tests/nine-grid.ts      # 10 项真实链上交易测试
 ├── .github/
 │   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e
 │   ├── workflows/release.yml   # tag → 三平台 tar.gz + 自动发版说明
@@ -79,8 +92,7 @@ nine-grid/
 ├── .cargo/audit.toml           # cargo-audit 的忽略项（每条带理由）
 ├── .rustfmt.toml / .taplo.toml # 格式规则（stable 可用子集）
 ├── cliff.toml                  # git-cliff：按 conventional commit 生成 changelog
-├── chain/                      # 阶段 B 的 Anchor 探路工程（已冻结）
-├── Justfile                    # just check = CI 的全部检查
+├── Justfile                    # just check = CI；just chain-test = 链上端到端
 └── Cargo.toml                  # workspace
 ```
 
@@ -198,8 +210,10 @@ DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
 
 ```bash
 just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
-cargo test                       # 26 个单元测试（core 17 + bot 9）
-bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来）
+cargo test                       # 31 个单元测试（core 22 + bot 9）
+bash scripts/smoke.sh            # 本地版 33 项端到端检查（服务需先跑起来）
+just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
+just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
 ```
 
 单元测试里有三个值得单说的：
@@ -212,6 +226,10 @@ bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来
   这条比"能赢"更重要 —— 它证明搜索没有漏掉防守分支。
 
 冒烟脚本覆盖了正常对局 + 全部拒绝分支（不是你的回合、格子被占、版本过期、非玩家、终局后落子、第三人加入……）。
+
+链上还有一条关键的**一致性测试** `judge_matches_core_on_all_19683_boards`：把 3⁹ 种棋盘在链上账户编码和 core 之间反复往返，
+证明「u8 盘面 → core 判胜」这条桥不丢信息。链上端到端测试 10 项跑在真实 `solana-test-validator` 上，
+用部署后的 `.so` 发真实交易，覆盖完整对局 + 全部拒绝分支 + 终局冻结 + 关账户退租金。
 
 ---
 
@@ -320,25 +338,45 @@ bash scripts/smoke.sh            # 33 项端到端检查（服务需先跑起来
 
 ---
 
-## 十一、下一步：上链要改什么
+## 十一、上链：哪些换了宿主，哪些一行没动
 
-| 现在 | 上链后 | 规则代码要改吗 |
+阶段 B 已经做完并跑通。链上程序用 Anchor 0.32.1，程序 ID `AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6`，
+4 个指令（create_game / join_game / play / close_game），10 项真实交易测试全过。
+
+| 本地版 | 链上版 | 规则代码要改吗 |
 |---|---|---|
 | 6 位房间码 | PDA `["game", 创建者, game_id]` | 否 |
-| `games` 一行 + `moves` 多行 | 一个约 100 字节的账户 | 否 |
-| `if !ok { return Err(...) }` | `require!(ok, Error)` | 只改报错写法 |
+| `games` 一行 + `moves` 多行 | 一个 101 字节账户 + 落子事件 | 否（存法不同，走同一个状态机） |
+| `if !ok { return Err(...) }` | `require!(ok, Error)` | 否，错误由 `RuleError → NineGridError` 一一映射 |
 | `FOR UPDATE` 行锁 | Solana 账户锁（天然串行） | 否 |
 | `version` 乐观锁 | 每笔交易自带 recent blockhash | 客户端换实现 |
-| `player_id`（localStorage UUID） | Phantom 签名 + Pubkey | 新增一层鉴权 |
+| `player_id`（localStorage UUID） | 钱包签名 + Pubkey | 新增一层鉴权 |
+| `Game::apply` 判胜/轮次/终局 | **同一个 `Game::apply`** | **完全没动** |
 
-`chain/` 里留着一个已经过编译的 Anchor 探路工程（程序 ID `AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6`，6 个单测通过），
-它证明了两件事：判胜逻辑确实很短，SBF 编译没问题。但它**没有**接入这个服务，先冻着，等玩法验证完再动。
+**最关键的一点**：冻结版合约原本自己抄了一份 `judge()` 和 `WIN_LINES`，这次上链把它们全删了。
+链上账户通过 `to_rules()`（内部 `Board::from_codes` + `Game::restore`）还原成 core 的状态机，
+调 `apply()` 裁决后再 `apply_rules()` 写回。规则从此只有一份 —— 改 core 一处，本地和链上同时生效。
 
-再往后才是可选项：战绩与排行榜、观战实时化（SSE）、多种难度的机器人（现在是满分，只会让你平）。
+core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_codes/to_codes`、`GameState::to_code/from_code`、
+`Game::restore`。它们只做「字节 ↔ 规则状态」的翻译和一致性校验（比如状态说 O 赢，棋盘就必须真有三连），
+不引入 anchor / solana 依赖，所以 core 仍然是零 IO、可独立测试的那份规则。
+
+### 两个值得记的细节
+
+- **账户布局保持 101 字节不变**：冻结版老账户可以直接读，不需要迁移。IDL 里的 `GameState` 枚举顺序
+  与 core 的 `to_code` 严格对齐（0–4），有专门的测试守着，错位就编译期红灯。
+- **`InProgress` + 0 手是合法状态**：两个钱包都入座但还没落子时就是这样。本地版曾因此踩过坑
+  （空棋谱被误判成 `waiting`），链上用 `restore` 时刻意不从手数反推开局与否，只校验状态与棋盘不矛盾。
+
+链上测试环境被沙盒坑过一次：ts-node 默认在 `$HOME` 建缓存目录，受限环境里 `mkdir` 被拒，
+报成费解的 `[ERROR] No such file or directory`。`scripts/chain-test.sh` 里用 `TS_NODE_CACHE=false` 绕开了。
+
+再往后才是可选项：战绩与排行榜、观战实时化（SSE）、多种难度的机器人（现在是满分，只会让你平），
+或者给链上版配一个能连 Phantom 的前端页面。
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。
-如果哪天它想自己判胜负，这个项目就毁了 —— 那意味着规则有了第二份实现。
+如果哪天它想自己判胜负，这个项目就毁了 —— 那意味着规则有了第二份实现。链上版同理。
 
 ---
 

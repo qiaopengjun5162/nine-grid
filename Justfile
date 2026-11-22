@@ -37,9 +37,9 @@ test-nextest:
 audit:
     cargo audit
 
-# MSRV：Cargo.toml 写着 rust-version = "1.89"，这一条让它是真的
+# MSRV：Cargo.toml 写着 rust-version = "1.94"，这一条让它是真的
 msrv:
-    cargo +1.89.0 check --all-features --locked
+    cargo +1.94.0 check --all-features --locked
 
 # 端到端冒烟：需要服务已经在跑
 smoke:

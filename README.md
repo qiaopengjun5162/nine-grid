@@ -5,7 +5,7 @@
 [![CI](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml)
 [![Pages](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/pages.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/pages.yml)
 [![release](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml)
-[![MSRV](https://img.shields.io/badge/MSRV-1.89-blue)](Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.94-blue)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 **链上版在线试玩**：<https://qiaopengjun5162.github.io/nine-grid/> （已部署到 Solana Devnet，连 Phantom 即可玩）
@@ -184,7 +184,7 @@ waiting ──join──▶ in_progress ──三连──▶ o_won / x_won
 
 ## 五、跑起来
 
-前置：Postgres 14+、Rust 1.89+（CI 里的 `msrv` job 会守住这条）。
+前置：Postgres 14+、Rust 1.94+（CI 里的 `msrv` job 会守住这条）。
 
 ```bash
 createdb nine_grid
@@ -214,7 +214,7 @@ cargo run -p nine-grid-server
 | `fmt` | 代码和 TOML 都别手搓格式 | `cargo fmt --check` + `taplo fmt --check` |
 | `clippy` | 没有"能编译但显然写错"的地方 | `cargo clippy --all-targets --all-features --tests --benches -- -D warnings` |
 | `test` | 26 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
-| `msrv` | `rust-version = "1.89"` 不是一句空话 | `cargo +1.89.0 check --locked` |
+| `msrv` | `rust-version = "1.94"` 不是一句空话 | `cargo +1.94.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
 | `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
 
@@ -225,7 +225,8 @@ cargo run -p nine-grid-server
 1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
    所以 CI 里起一个 `postgres:17` service，跑完整个 42 项冒烟。这一步的存在感比前面五个加起来还高。
 2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
-   不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 现在改成 1.89 并且由 CI 看着。
+   不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 后来改成 1.89 并由 CI 看着。
+   再后来 `sqlx 0.9` 把门槛抬到 1.94，这个 job 又跟着升了一次。历史可以变，但「承诺必须被验证」这条没变。
 3. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
    （`cargo tree -i libsqlite3-sys` 在默认 target 下返回 `nothing to print`，根本没编译进产物），
    不是我们能升级的。用配置文件而不是 `--ignore` 参数，是为了让"为什么忽略"跟着代码一起走。

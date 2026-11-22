@@ -79,16 +79,16 @@ jobs:
         run: cargo nextest run --all-features
 
   msrv:
-    name: msrv（1.89）
+    name: msrv（1.94）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
-      # Cargo.toml 里写了 rust-version = "1.89"，这个 job 负责让那句话是真的。
+      # Cargo.toml 里写了 rust-version = "1.94"，这个 job 负责让那句话是真的。
       # --locked 也重要：检查我们实际发布的那套依赖，而不是让旧工具链重新解析一遍。
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.89.0"
+          toolchain: "1.94.0"
 
       - uses: Swatinem/rust-cache@v2
         with:

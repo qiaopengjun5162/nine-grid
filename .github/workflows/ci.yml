@@ -24,7 +24,7 @@ jobs:
     name: fmt（rustfmt + taplo）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -48,7 +48,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,7 +65,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -82,7 +82,7 @@ jobs:
     name: msrv（1.89）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Cargo.toml 里写了 rust-version = "1.89"，这个 job 负责让那句话是真的。
       # --locked 也重要：检查我们实际发布的那套依赖，而不是让旧工具链重新解析一遍。
@@ -101,7 +101,7 @@ jobs:
     name: audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -137,7 +137,7 @@ jobs:
       BIND_ADDR: 127.0.0.1:8080
       RUST_LOG: info,nine_grid_server=debug
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -170,7 +170,7 @@ jobs:
 
       - name: 失败时上传服务日志
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-log
           path: /tmp/server.log

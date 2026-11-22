@@ -25,7 +25,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,7 +64,7 @@ jobs:
             suffix: macos-arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -93,7 +93,7 @@ jobs:
       - name: 确认静态文件确实进了包
         run: tar tzf "dist/nine-grid-${{ matrix.suffix }}.tar.gz" | grep -q "static/index.html"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nine-grid-${{ matrix.suffix }}
           path: |
@@ -105,11 +105,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: nine-grid-*
@@ -125,7 +125,7 @@ jobs:
           OUTPUT: CHANGELOG.md
 
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           body: ${{ steps.git-cliff.outputs.content }}

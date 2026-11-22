@@ -125,7 +125,7 @@ jobs:
           OUTPUT: CHANGELOG.md
 
       - name: 发布
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           body: ${{ steps.git-cliff.outputs.content }}

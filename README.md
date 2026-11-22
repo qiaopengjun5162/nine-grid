@@ -1,10 +1,14 @@
 # 九宫棋 · Nine Grid
 
-<!-- 仓库名如果改了，把下面三条 badge 里的 nine-grid 一起换掉 -->
+<!-- 仓库名如果改了，把下面 badge 里的 nine-grid 一起换掉 -->
 
 [![CI](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/ci.yml)
+[![Pages](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/pages.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/pages.yml)
 [![release](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml/badge.svg)](https://github.com/qiaopengjun5162/nine-grid/actions/workflows/release.yml)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-blue)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+**链上版在线试玩**：<https://qiaopengjun5162.github.io/nine-grid/> （已部署到 Solana Devnet，连 Phantom 即可玩）
 
 公园里的九宫棋（井字棋），先用 Rust 做成一个**真能下**的网页游戏。
 
@@ -121,7 +125,10 @@ nine-grid/
 ├── .github/
 │   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e
 │   ├── workflows/release.yml   # tag → 三平台 tar.gz + 自动发版说明
+│   ├── workflows/pages.yml     # 链上版前端 → GitHub Pages（Devnet）
 │   └── dependabot.yml
+├── docs/PHANTOM_TESTING.md      # Phantom 真机测试清单（沙盒无法自动验证的部分）
+├── LICENSE                     # MIT
 ├── .cargo/audit.toml           # cargo-audit 的忽略项（每条带理由）
 ├── .rustfmt.toml / .taplo.toml # 格式规则（stable 可用子集）
 ├── cliff.toml                  # git-cliff：按 conventional commit 生成 changelog
@@ -200,7 +207,7 @@ cargo run -p nine-grid-server
 
 ## 六、CI/CD
 
-`.github/workflows/` 里两个 workflow。每个 job 都在替一句具体的话做担保，不跑没用的检查：
+`.github/workflows/` 里三个 workflow（CI、release、Pages）。CI 里每个 job 都在替一句具体的话做担保，不跑没用的检查：
 
 | job | 担保的是什么 | 对应命令 |
 |---|---|---|
@@ -426,9 +433,15 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 
 因为浏览器里没法自动操作 Phantom，`chain-test.sh` 的第 5 步用 Node keypair 代替钱包，
 以**和 chain.js 完全相同的方式**（同一份 IDL、同样的 PDA 派生、同样的 `program.methods` 调用、
-同样的账户解码）跑一局，保证前端的交易构造逻辑不跑偏。真机上仍需手动连 Phantom 验证签名流程。
+同样的账户解码）跑一局，保证前端的交易构造逻辑不跑偏。真机上仍需手动连 Phantom 验证签名流程，
+逐步操作见 [`docs/PHANTOM_TESTING.md`](docs/PHANTOM_TESTING.md)。
 
-再往后才是可选项：把合约部署到公开集群、给观战加回放时间轴、做跨局积分。
+**公网部署**：程序已用同一把 keypair 部署到 **Solana Devnet**（程序 ID 与本地一致，所以 IDL 通用），
+链上版前端经 GitHub Actions 发布到 <https://qiaopengjun5162.github.io/nine-grid/>。
+页面默认 Devnet，可用 `?cluster=localnet` 切回本地验证器。
+devnet 上已用 Node 脚本实跑一局（建局→入座→落子→关局）全部通过。
+
+再往后才是可选项：给观战加回放时间轴、做跨局积分。
 （三档难度、SSE 观战、战绩榜、连 Phantom 的链上前端都已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：

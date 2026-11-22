@@ -916,3 +916,19 @@ button:disabled { cursor: default; }
   border-radius: 4px;
   background: rgba(122, 98, 72, 0.1);
 }
+
+/* ── 链上版：集群提示 + 浏览器链接 ── */
+.cluster-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #8a7458;
+  line-height: 1.6;
+}
+.tx-link {
+  font-size: 12px;
+  color: var(--rust);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  white-space: nowrap;
+}
+.tx-link:hover { border-bottom-color: var(--rust); }

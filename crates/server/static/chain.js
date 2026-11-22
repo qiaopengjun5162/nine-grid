@@ -14,8 +14,36 @@ import {
 
 const PROGRAM_ID = new PublicKey("AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6");
 const GAME_SEED = Buffer.from("game");
-// RPC 地址：本地验证器默认 8899。部署到 devnet 时改这里即可，程序 ID 不变。
-const RPC_URL = window.CHAIN_RPC_URL || "http://127.0.0.1:8899";
+
+// ── 集群配置 ──
+// 同一个 program keypair 部署到 localnet / devnet，程序 ID 不变，IDL 也通用。
+// 公网（GitHub Pages）默认 devnet；本机开发可用 ?cluster=localnet 切回本地验证器。
+// URL 参数 > window.CHAIN_RPC_URL > 默认值。
+const CLUSTERS = {
+  devnet: {
+    label: "Devnet",
+    rpc: "https://api.devnet.solana.com",
+    // Phantom 里的网络名，用来核对钱包是否切对
+    phantomNetwork: "Devnet",
+    explorer: "https://explorer.solana.com",
+    explorerParam: "cluster=devnet",
+  },
+  localnet: {
+    label: "本地验证器",
+    rpc: "http://127.0.0.1:8899",
+    phantomNetwork: "Localhost",
+    explorer: "https://explorer.solana.com",
+    explorerParam: "cluster=custom&customUrl=http%3A%2F%2F127.0.0.1%3A8899",
+  },
+};
+const params = new URLSearchParams(location.search);
+const CLUSTER_KEY = params.get("cluster");
+const CLUSTER =
+  CLUSTERS[CLUSTER_KEY] ||
+  (window.CHAIN_CLUSTER && CLUSTERS[window.CHAIN_CLUSTER]) ||
+  CLUSTERS.devnet;
+const RPC_URL = window.CHAIN_RPC_URL || CLUSTER.rpc;
+const isLocalnet = CLUSTER === CLUSTERS.localnet;
 const WIN_LINES = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
   [0, 3, 6], [1, 4, 7], [2, 5, 8],
@@ -51,6 +79,7 @@ const ui = {
   board: document.getElementById("chain-board"),
   stage: document.getElementById("chain-stage"),
   txState: document.getElementById("chain-tx-state"),
+  txLink: document.getElementById("chain-tx-link"),
   closeBtn: document.getElementById("chain-close-btn"),
   leaveBtn: document.getElementById("chain-leave-btn"),
 };
@@ -94,17 +123,46 @@ function showAlert(text) {
 function clearAlert() {
   ui.alert.classList.add("hidden");
 }
-function setTxState(text, kind = "idle") {
+function setTxState(text, kind = "idle", sig = null) {
   ui.txState.textContent = text;
   ui.txState.dataset.kind = kind;
+  if (sig) {
+    ui.txLink.href = explorerLink(sig);
+    ui.txLink.classList.remove("hidden");
+  } else {
+    ui.txLink.classList.add("hidden");
+  }
 }
 function shortAddr(pk) {
   const s = pk.toBase58();
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
+function setupClusterUi() {
+  // Pages 上只发布链上版，本地版/观战链接指向的相对页面不存在，隐藏掉
+  const onPages = location.hostname.endsWith("github.io");
+  if (onPages) {
+    document.querySelectorAll(".top-nav a.local-only").forEach((a) => {
+      a.classList.add("hidden");
+    });
+  }
+  const sw = document.getElementById("cluster-switch");
+  const hint = document.getElementById("cluster-hint");
+  if (!sw || !hint) return;
+  if (isLocalnet) {
+    sw.textContent = "切到 Devnet";
+    sw.href = "?cluster=devnet";
+    hint.textContent = "当前本地验证器 · 钱包切到 Localhost · 需先在本机起验证器并部署程序";
+  } else {
+    sw.textContent = "切到本地验证器";
+    sw.href = "?cluster=localnet";
+    hint.textContent = "当前 Devnet · 程序已上公网，钱包切到 Devnet 即可玩";
+  }
+}
+
 async function boot() {
   buildBoard();
+  setupClusterUi();
 
   if (!window.solana?.isPhantom) {
     showAlert("没有检测到 Phantom 钱包。请先安装 Phantom 浏览器扩展，再刷新本页。本地版（首页）无需钱包也能玩。");
@@ -120,8 +178,8 @@ async function boot() {
     });
     anchor.setProvider(state.provider);
 
-    // IDL 本地托管，和部署的程序 ID 对齐
-    const idl = await fetch("/chain/idl.json").then((r) => {
+    // IDL 本地托管，和部署的程序 ID 对齐。相对路径兼容本地与 Pages 子路径。
+    const idl = await fetch("./chain/idl.json").then((r) => {
       if (!r.ok) throw new Error("IDL 加载失败");
       return r.json();
     });
@@ -172,14 +230,26 @@ function onConnected(pubkey) {
 }
 
 async function checkNetwork() {
+  // 只用 RPC 配置提示该切到哪个 Phantom 网络。
+  // 不去比对 genesis 指纹：本地验证器每次 reset 都换 genesis，硬编码会误报。
+  ui.networkNote.textContent = isLocalnet
+    ? `当前：本地验证器（${RPC_URL}）。请先把 Phantom 切到 Localhost，再建局。`
+    : `当前：Devnet（${RPC_URL}）。请把 Phantom 也切到 Devnet —— 网络不一致会签名失败。`;
+  ui.networkNote.classList.remove("hidden");
   try {
-    const genesis = await state.connection.getGenesisHash();
-    const isLocal = genesis.startsWith("EtWTRABZaYq6iMfeYKouRu166VU2xqa1");
-    ui.networkNote.textContent = `当前 RPC：${RPC_URL}（${isLocal ? "本地验证器" : "自定义集群"}）。确保 Phantom 也切到同一网络。`;
-    ui.networkNote.classList.remove("hidden");
+    await state.connection.getGenesisHash(); // 探活：能拿到就说明 RPC 通
+    ui.networkNote.dataset.ok = "true";
   } catch {
-    // RPC 不可达时建局/落子会报错，这里不重复提示
+    ui.networkNote.dataset.ok = "false";
+    ui.networkNote.textContent += isLocalnet
+      ? " 但 RPC 不可达 —— 本地验证器起了吗？"
+      : " 但 RPC 不可达 —— 检查网络。";
   }
+}
+
+// 区块浏览器链接（带正确集群参数）
+function explorerLink(sig) {
+  return `${CLUSTER.explorer}/tx/${sig}?${CLUSTER.explorerParam}`;
 }
 
 function gamePda(owner, gameId) {
@@ -208,7 +278,7 @@ async function onCreate() {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
-    setTxState(`建局成功 ${sig.slice(0, 8)}…`, "ok");
+    setTxState(`建局成功 ${sig.slice(0, 8)}…`, "ok", sig);
     enterGame(pda.toBase58());
   } catch (err) {
     setTxState("建局失败", "err");
@@ -241,7 +311,8 @@ async function enterGame(pdaStr) {
   ui.lobby.classList.add("hidden");
   ui.game.classList.remove("hidden");
   ui.pdaDisplay.textContent = pda.toBase58();
-  history.replaceState(null, "", `?pda=${pda.toBase58()}`);
+  const clusterParam = CLUSTER_KEY ? `cluster=${CLUSTER_KEY}&` : "";
+  history.replaceState(null, "", `?${clusterParam}pda=${pda.toBase58()}`);
 
   try {
     const account = await state.program.account.game.fetch(pda);
@@ -271,7 +342,8 @@ function leaveGame() {
   state.pda = null;
   ui.game.classList.add("hidden");
   ui.lobby.classList.remove("hidden");
-  history.replaceState(null, "", location.pathname);
+  history.replaceState(null, "", CLUSTER_KEY ? `?cluster=${CLUSTER_KEY}` : location.pathname);
+  setTxState("等待签名", "idle");
   clearAlert();
 }
 
@@ -393,7 +465,7 @@ async function onCellClick(index) {
       .play(index)
       .accountsPartial({ game: state.pda, player: state.wallet.publicKey })
       .rpc();
-    setTxState(`落子成功 ${sig.slice(0, 8)}…`, "ok");
+    setTxState(`落子成功 ${sig.slice(0, 8)}…`, "ok", sig);
     // 账户订阅会触发刷新；这里也主动拉一次，避免订阅延迟
     const account = await state.program.account.game.fetch(state.pda);
     renderAccount(account);
@@ -421,11 +493,11 @@ async function onClose() {
   if (state.busy || !state.pda) return;
   state.busy = true;
   try {
-    await state.program.methods
+    const sig = await state.program.methods
       .closeGame()
       .accountsPartial({ game: state.pda, playerO: state.wallet.publicKey })
       .rpc();
-    setTxState("已关局，租金退回", "ok");
+    setTxState(`已关局 ${sig.slice(0, 8)}…`, "ok", sig);
     leaveGame();
   } catch (err) {
     showAlert(`关局失败：${err.message}`);

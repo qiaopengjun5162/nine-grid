@@ -12,7 +12,10 @@ const {
 } = require("@solana/web3.js");
 const fs = require("fs");
 
-const RPC = "http://127.0.0.1:8899";
+// 默认 localnet；设 VERIFY_RPC=https://api.devnet.solana.com 可验证公网部署。
+// devnet 上 airdrop 有限额，改用自己的钱包（和部署程序的是同一个）。
+const RPC = process.env.VERIFY_RPC || "http://127.0.0.1:8899";
+const IS_LOCAL = RPC.includes("127.0.0.1") || RPC.includes("localhost");
 const IDL = JSON.parse(
   fs.readFileSync(
     require("path").join(__dirname, "../crates/server/static/chain/idl.json"),
@@ -20,12 +23,59 @@ const IDL = JSON.parse(
   )
 );
 
+// 代理后面 wss 不通，web3.js 默认的 confirmTransaction（走 WebSocket 订阅）会超时。
+// devnet 验证时换成 HTTP 轮询 getSignatureStatuses，语义等价于确认，绕开订阅。
+function patchConfirmOverHttp(connection) {
+  const original = connection.confirmTransaction.bind(connection);
+  connection.confirmTransaction = async function (
+    sig,
+    commitment = "confirmed"
+  ) {
+    const signature = typeof sig === "string" ? sig : sig.signature;
+    for (let i = 0; i < 90; i += 1) {
+      const { value } = await this.getSignatureStatuses([signature]);
+      const st = value[0];
+      if (
+        st &&
+        (st.err ||
+          st.confirmationStatus === commitment ||
+          st.confirmationStatus === "finalized")
+      ) {
+        if (st.err) throw new Error(`交易失败: ${JSON.stringify(st.err)}`);
+        return { value: st };
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return original(sig, commitment); // 兜底
+  };
+}
+
 (async () => {
   const connection = new Connection(RPC, "confirmed");
-  const wallet = Keypair.generate();
-  // 空投 SOL 当手续费
-  const sig = await connection.requestAirdrop(wallet.publicKey, 2 * 1e9);
-  await connection.confirmTransaction(sig, "confirmed");
+  if (!IS_LOCAL) patchConfirmOverHttp(connection);
+  const wallet = IS_LOCAL
+    ? Keypair.generate()
+    : Keypair.fromSecretKey(
+        Uint8Array.from(
+          JSON.parse(
+            fs.readFileSync(
+              require("path").join(process.env.HOME, ".config/solana/id.json"),
+              "utf8"
+            )
+          )
+        )
+      );
+  if (IS_LOCAL) {
+    // 本地验证器随便空投；devnet 用自己的钱包，不浪费 faucet 限额
+    const airdropSig = await connection.requestAirdrop(
+      wallet.publicKey,
+      2 * 1e9
+    );
+    await connection.confirmTransaction(airdropSig, "confirmed");
+  }
+  console.log(
+    `验证集群: ${RPC} · 钱包 ${wallet.publicKey.toBase58().slice(0, 8)}…`
+  );
 
   const provider = new anchor.AnchorProvider(
     connection,
@@ -66,8 +116,22 @@ const IDL = JSON.parse(
 
   // 自己跟自己下不了（CannotPlayYourself），所以加一个 X 钱包
   const playerX = Keypair.generate();
-  const sigX = await connection.requestAirdrop(playerX.publicKey, 2 * 1e9);
-  await connection.confirmTransaction(sigX, "confirmed");
+  if (IS_LOCAL) {
+    const sigX = await connection.requestAirdrop(playerX.publicKey, 2 * 1e9);
+    await connection.confirmTransaction(sigX, "confirmed");
+  } else {
+    // devnet faucet 已关闭：从主钱包转一点 SOL 给 playerX 当手续费
+    const { SystemProgram: Sys, Transaction: Tx } = require("@solana/web3.js");
+    const transfer = new Tx().add(
+      Sys.transfer({
+        fromPubkey: wallet.publicKey,
+        toPubkey: playerX.publicKey,
+        lamports: 2e9,
+      })
+    );
+    const transferSig = await connection.sendTransaction(transfer, [wallet]);
+    await connection.confirmTransaction(transferSig, "confirmed");
+  }
 
   // 2. joinGame —— 前端 onJoin 后链上账户的变化由 enterGame 读取
   const providerX = new anchor.AnchorProvider(

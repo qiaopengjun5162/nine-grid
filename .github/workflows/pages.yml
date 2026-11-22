@@ -1,0 +1,63 @@
+name: Pages
+
+# 把链上版前端发布到 GitHub Pages。
+# 只发布 chain.html 这一页所需的静态文件 —— 主页/观战页依赖后端 API，
+# 在纯静态托管上跑不了，所以不发布它们（页面里的链接在 Pages 上会自动隐藏）。
+#
+# 发布后地址：https://<用户名>.github.io/nine-grid/
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/server/static/chain.html"
+      - "crates/server/static/chain.js"
+      - "crates/server/static/style.css"
+      - "crates/server/static/chain/idl.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一分支连续推送时取消上一轮，避免 Pages 部署排队
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装静态站点
+        run: |
+          set -euo pipefail
+          SRC=crates/server/static
+          mkdir -p _site/chain
+          # chain.html 同时作为首页，这样 /nine-grid/ 直接就是链上版
+          cp "$SRC/chain.html" _site/index.html
+          cp "$SRC/chain.html" _site/chain.html
+          cp "$SRC/chain.js"   _site/chain.js
+          cp "$SRC/style.css"  _site/style.css
+          cp "$SRC/chain/idl.json" _site/chain/idl.json
+          echo "发布文件："
+          find _site -type f | sort
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

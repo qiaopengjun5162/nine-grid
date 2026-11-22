@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#efe4d0">
   <title>链上对局 · 九宫棋</title>
-  <link rel="stylesheet" href="/style.css">
+  <!-- 相对路径：本地根路径与 GitHub Pages 子路径（/nine-grid/）下都能加载 -->
+  <link rel="stylesheet" href="./style.css">
   <!--
     链上版依赖 Anchor + web3.js。为了保持"无构建步骤"，从 esm.sh 按 ESM 加载，
     配合下面的 importmap 固定版本。首次打开需联网；依赖版本与 chain/package.json 对齐。
@@ -35,9 +36,11 @@
       </div>
       <p class="sub">规则跑在 Solana 链上，同一份 core。<br>钱包签名落子，判胜由程序说了算。</p>
       <nav class="top-nav">
-        <a href="/">本地版</a>
-        <a href="/watch.html">观战</a>
+        <a class="local-only" href="./">本地版</a>
+        <a class="local-only" href="./watch.html">观战</a>
+        <a id="cluster-switch" href="?cluster=localnet">切到本地验证器</a>
       </nav>
+      <p class="cluster-hint" id="cluster-hint">当前 Devnet · 程序 ID 两网一致，钱包请切到对应网络</p>
     </header>
 
     <!-- 依赖/钱包没就绪时显示，正常对局时隐藏 -->
@@ -91,6 +94,7 @@
 
       <div class="chain-foot">
         <span id="chain-tx-state" class="tx-state">等待签名</span>
+        <a id="chain-tx-link" class="tx-link hidden" target="_blank" rel="noopener">浏览器查看 ↗</a>
         <button id="chain-close-btn" class="ghost small hidden" type="button">关局退租金</button>
         <button id="chain-leave-btn" class="ghost small" type="button">退出</button>
       </div>

@@ -8,7 +8,7 @@
 //! 服务端把它当成一个坐进 X 座位的普通对手，落子一样要过 `apply()` 的校验。
 
 use nine_grid_core::{Game, GameState, Mark, winner_mark};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 /// 胜负分值基数。必须远大于最大手数（9），保证"任何胜利"都强于"平局"，
@@ -180,10 +180,10 @@ pub fn choose_move_with_rng<R: Rng + ?Sized>(
             } else {
                 &safe[..]
             };
-            if rng.gen_bool(0.65) {
+            if rng.random_bool(0.65) {
                 best(pool)?
             } else {
-                pool[rng.gen_range(0..pool.len())].1
+                pool[rng.random_range(0..pool.len())].1
             }
         }
         Difficulty::Easy => {
@@ -191,12 +191,12 @@ pub fn choose_move_with_rng<R: Rng + ?Sized>(
             // 其余时候只有两成走最优，八成从所有合法点里随手挑 —— 这样才赢得动它。
             let winning: Vec<(i32, u8)> =
                 scored.iter().copied().filter(|(score, _)| *score >= WIN - 9).collect();
-            if !winning.is_empty() && rng.gen_bool(0.8) {
+            if !winning.is_empty() && rng.random_bool(0.8) {
                 best(&winning)?
-            } else if rng.gen_bool(0.25) {
+            } else if rng.random_bool(0.25) {
                 best(&scored)?
             } else {
-                scored[rng.gen_range(0..scored.len())].1
+                scored[rng.random_range(0..scored.len())].1
             }
         }
     };
@@ -207,7 +207,7 @@ pub fn choose_move_with_rng<R: Rng + ?Sized>(
 /// 按难度选一步。返回 `None` 的三种情况：对局已结束、还在等人加入、棋盘已满。
 #[must_use]
 pub fn choose_move_with(game: &Game, difficulty: Difficulty) -> Option<u8> {
-    choose_move_with_rng(game, difficulty, &mut rand::thread_rng())
+    choose_move_with_rng(game, difficulty, &mut rand::rng())
 }
 
 /// 完美难度（困难档），也是历史入口 —— 保留它让老调用方一行不用改。
@@ -355,7 +355,7 @@ mod tests {
         let game = game_from(&[(Mark::O, 4), (Mark::X, 0), (Mark::O, 8), (Mark::X, 2)]);
         for difficulty in [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard] {
             for _ in 0..20 {
-                let pos = choose_move_with_rng(&game, difficulty, &mut rand::thread_rng())
+                let pos = choose_move_with_rng(&game, difficulty, &mut rand::rng())
                     .expect("进行中的局面必须有棋可下");
                 assert!(game.board().is_empty_at(usize::from(pos)));
                 assert!(game.after(game.turn(), pos).is_ok());

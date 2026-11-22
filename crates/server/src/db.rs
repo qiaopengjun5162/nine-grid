@@ -1,6 +1,6 @@
 use nine_grid_bot::Difficulty;
 use nine_grid_core::{FIRST_MARK, Game, GameState, Mark};
-use rand::Rng;
+use rand::RngExt;
 use serde::Serialize;
 use sqlx::{
     PgConnection, PgPool, Postgres, Row,
@@ -436,9 +436,9 @@ pub async fn snapshot(pool: &PgPool, code: &str) -> Result<GameSnapshot, AppErro
 }
 
 fn random_room_code() -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..ROOM_LEN)
-        .map(|_| char::from(ROOM_ALPHABET[rng.gen_range(0..ROOM_ALPHABET.len())]))
+        .map(|_| char::from(ROOM_ALPHABET[rng.random_range(0..ROOM_ALPHABET.len())]))
         .collect()
 }
 

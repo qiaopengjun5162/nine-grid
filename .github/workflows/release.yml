@@ -93,7 +93,7 @@ jobs:
       - name: 确认静态文件确实进了包
         run: tar tzf "dist/nine-grid-${{ matrix.suffix }}.tar.gz" | grep -q "static/index.html"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nine-grid-${{ matrix.suffix }}
           path: |

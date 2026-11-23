@@ -13,6 +13,7 @@ on:
       - "crates/server/static/chain.html"
       - "crates/server/static/chain.js"
       - "crates/server/static/style.css"
+      - "crates/server/static/theme.js"
       - "crates/server/static/chain/idl.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -43,6 +44,7 @@ jobs:
           cp "$SRC/chain.html" _site/chain.html
           cp "$SRC/chain.js"   _site/chain.js
           cp "$SRC/style.css"  _site/style.css
+          cp "$SRC/theme.js"   _site/theme.js
           cp "$SRC/chain/idl.json" _site/chain/idl.json
           echo "发布文件："
           find _site -type f | sort

@@ -20,6 +20,15 @@
     }
   }
   </script>
+  <script>
+    // 防闪烁：在样式和页面绘制前套用主题，避免深色用户先看到一帧浅色
+    try {
+      var t = localStorage.getItem("ninegrid-theme");
+      if (t === "cosmos" || t === "classic") {
+        document.documentElement.setAttribute("data-theme", t);
+      }
+    } catch (e) { /* 隐私模式下忽略 */ }
+  </script>
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -33,6 +42,11 @@
       <div class="title-row">
         <h1>链上对局</h1>
         <span class="seal" aria-hidden="true">链<br>上</span>
+        <span class="member-badge" aria-hidden="true">MEMBER</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
+          <span class="theme-opt" data-theme-opt="classic" aria-pressed="true">古典</span>
+          <span class="theme-opt" data-theme-opt="cosmos" aria-pressed="false">✦ 星穹会员</span>
+        </button>
       </div>
       <p class="sub">规则跑在 Solana 链上，同一份 core。<br>钱包签名落子，判胜由程序说了算。</p>
       <nav class="top-nav">
@@ -118,6 +132,7 @@
       </div>
     </section>
   </main>
-  <script type="module" src="/chain.js"></script>
+  <script src="./theme.js"></script>
+  <script type="module" src="./chain.js"></script>
 </body>
 </html>

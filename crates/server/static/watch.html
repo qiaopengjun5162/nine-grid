@@ -6,6 +6,14 @@
   <meta name="theme-color" content="#efe4d0">
   <title>观战 · 九宫棋</title>
   <link rel="stylesheet" href="/style.css">
+  <script>
+    try {
+      var t = localStorage.getItem("ninegrid-theme");
+      if (t === "cosmos" || t === "classic") {
+        document.documentElement.setAttribute("data-theme", t);
+      }
+    } catch (e) { /* 隐私模式下忽略 */ }
+  </script>
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -19,6 +27,11 @@
       <div class="title-row">
         <h1>观战</h1>
         <span class="seal" aria-hidden="true">观<br>棋</span>
+        <span class="member-badge" aria-hidden="true">MEMBER</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
+          <span class="theme-opt" data-theme-opt="classic" aria-pressed="true">古典</span>
+          <span class="theme-opt" data-theme-opt="cosmos" aria-pressed="false">✦ 星穹会员</span>
+        </button>
       </div>
       <p class="sub">把房间码递进来，实时看这一盘棋怎么下。<br>只读旁观，不影响对局。</p>
       <nav class="top-nav">
@@ -69,6 +82,7 @@
       <button id="watch-leave-btn" class="ghost small" type="button">退出观战</button>
     </section>
   </main>
+  <script src="/theme.js"></script>
   <script src="/watch.js" defer></script>
 </body>
 </html>

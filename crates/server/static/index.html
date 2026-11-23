@@ -6,6 +6,14 @@
   <meta name="theme-color" content="#efe4d0">
   <title>九宫棋 · Nine Grid</title>
   <link rel="stylesheet" href="/style.css">
+  <script>
+    try {
+      var t = localStorage.getItem("ninegrid-theme");
+      if (t === "cosmos" || t === "classic") {
+        document.documentElement.setAttribute("data-theme", t);
+      }
+    } catch (e) { /* 隐私模式下忽略 */ }
+  </script>
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -19,6 +27,11 @@
       <div class="title-row">
         <h1>九宫棋</h1>
         <span class="seal" aria-hidden="true">九<br>宫</span>
+        <span class="member-badge" aria-hidden="true">MEMBER</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
+          <span class="theme-opt" data-theme-opt="classic" aria-pressed="true">古典</span>
+          <span class="theme-opt" data-theme-opt="cosmos" aria-pressed="false">✦ 星穹会员</span>
+        </button>
       </div>
       <p class="sub">三个棋子横、竖、斜连成一线即胜。<br>棋盘形如「井」字，故又称井字棋。</p>
       <nav class="top-nav">
@@ -179,6 +192,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
+  <script src="/theme.js"></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

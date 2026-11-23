@@ -80,6 +80,7 @@ const ui = {
   stage: document.getElementById("chain-stage"),
   txState: document.getElementById("chain-tx-state"),
   txLink: document.getElementById("chain-tx-link"),
+  joinGameBtn: document.getElementById("chain-join-game-btn"),
   closeBtn: document.getElementById("chain-close-btn"),
   leaveBtn: document.getElementById("chain-leave-btn"),
 };
@@ -201,6 +202,7 @@ function bindEvents() {
   ui.createBtn.addEventListener("click", onCreate);
   ui.joinForm.addEventListener("submit", onJoin);
   ui.copyBtn.addEventListener("click", copyPda);
+  ui.joinGameBtn.addEventListener("click", onJoinGameClick);
   ui.closeBtn.addEventListener("click", onClose);
   ui.leaveBtn.addEventListener("click", leaveGame);
 }
@@ -289,11 +291,53 @@ async function onCreate() {
   }
 }
 
+// X 方入座：发一笔真正的 joinGame 交易，链上把 player_x 写上、状态推进到对局中。
+// 前端绝不自己改状态 —— 只发交易，结果由链上裁决后再刷新账户。
+async function sendJoinGame(pdaStr) {
+  if (state.busy) return false;
+  let pda;
+  try {
+    pda = new PublicKey(pdaStr);
+  } catch {
+    showAlert("PDA 地址格式不对，请检查是否复制完整。");
+    return false;
+  }
+  state.busy = true;
+  setTxState("发送入座交易…", "busy");
+  try {
+    const sig = await state.program.methods
+      .joinGame()
+      .accountsPartial({ game: pda, playerX: state.wallet.publicKey })
+      .rpc();
+    setTxState(`入座成功 ${sig.slice(0, 8)}…`, "ok", sig);
+    return true;
+  } catch (err) {
+    setTxState("入座失败", "err");
+    showAlert(`入座失败：${err.message}`);
+    return false;
+  } finally {
+    state.busy = false;
+  }
+}
+
 async function onJoin(event) {
   event.preventDefault();
   const pda = ui.pdaInput.value.trim();
   if (!pda) return;
-  enterGame(pda);
+  // 先发入座交易，成功后再订阅/渲染这局。
+  if (await sendJoinGame(pda)) {
+    enterGame(pda);
+  }
+}
+
+// 通过邀请链接 ?pda= 进来时会自动 enterGame，但还没落链上入座交易。
+// 对局页这个按钮让 X 补发 joinGame，按钮只在「等人 + 自己不是 O」时出现。
+async function onJoinGameClick() {
+  if (!state.pda) return;
+  if (await sendJoinGame(state.pda.toBase58())) {
+    const account = await state.program.account.game.fetch(state.pda);
+    renderAccount(account);
+  }
 }
 
 async function enterGame(pdaStr) {
@@ -395,6 +439,14 @@ function renderAccount(account) {
   ui.closeBtn.classList.toggle(
     "hidden",
     !(isOver && account.playerO.equals(state.wallet.publicKey)),
+  );
+
+  // 等人入座时，非建局方（潜在 X）显示「入座」按钮去发 joinGame。
+  // 建局方 O 看不到（链上也不允许自己入自己的局）。
+  const iamO = account.playerO.equals(state.wallet.publicKey);
+  ui.joinGameBtn.classList.toggle(
+    "hidden",
+    !(stateKey === "waitingForOpponent" && !iamO),
   );
 }
 

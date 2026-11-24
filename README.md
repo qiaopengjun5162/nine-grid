@@ -263,6 +263,7 @@ cargo test                       # 35 个单元测试（core 22 + bot 13）
 bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
+just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI 一局（需 Python playwright + pynacl）
 ```
 
 单元测试里有三个值得单说的：
@@ -447,6 +448,11 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
   ESM 依赖**不会**自动提供 Node 的全局 `Buffer`，而 `chain.js` 顶层第一句就是 `Buffer.from("game")`；
   所以另有一行 `import { Buffer } from "esm.sh/buffer"` 挂到 `globalThis`，且必须排在 `chain.js` 前面
   —— 少了它整个模块会在顶层崩溃、连钱包按钮都点不动。这条是踩过坑才补的，别删。
+- **两种链上验证，缺一不可**：`chain-test.sh` 用 Node keypair 直接调 `program.methods`，
+  证明交易构造对；`browser-e2e.sh` 用 Playwright 注入模拟 Phantom，走**真实 UI**
+  连钱包→建局→入座→5 手落子→判胜→关局，证明浏览器那条链（`boot()` 初始化、按钮绑定、
+  账户订阅刷新）也活着。Buffer 崩溃那次就是前者全绿、后者才能发现的事故 ——
+  CI 目前只跑前者（Node 环境装 Playwright + Solana 工具链成本高，留在本地跑）。
 - **Phantom → Anchor Wallet**：Phantom 注入的 `window.solana` 已经有 `publicKey` 和签名方法，
   补一层薄适配器就能喂给 `AnchorProvider`，不用引入整套 wallet-adapter。
 - **账户订阅代替轮询**：`connection.onAccountChange(pda, …)` 在账户变化时重新解码渲染，

@@ -3,7 +3,11 @@ name = "nine-grid-core"
 description = "九宫棋纯规则引擎：无 IO、无数据库、无链，可被服务端与链上程序共同复用。"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# 不继承 workspace 的 1.94：server 因 sqlx 0.9 需要它，但 core 是纯规则 crate，
+# 还要被链上 SBF 程序复用 —— Solana 工具链固定 rustc 1.89，若这里声明 1.94
+# 会导致 anchor build 直接拒绝编译（CI 不构建链上程序，全绿也发现不了）。
+# core 只依赖 serde/thiserror，1.89 完全够用。
+rust-version = "1.89"
 license.workspace = true
 
 [lints]

@@ -8,3 +8,7 @@ chain/target
 chain/node_modules
 chain/.anchor
 chain/test-ledger
+
+# 浏览器 E2E 脚本的 Python 缓存
+__pycache__/
+*.pyc

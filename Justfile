@@ -49,6 +49,10 @@ smoke:
 chain-test:
     bash scripts/chain-test.sh
 
+# 浏览器端 E2E：模拟 Phantom 走真实 UI 一局（验证 boot/按钮/订阅/判胜，自包含）
+browser-e2e:
+    bash scripts/browser-e2e.sh
+
 # 链上 Rust 单测（含 19683 棋盘一致性，不需要验证器）
 chain-unit:
     cd chain && cargo test-sbf -p nine-grid

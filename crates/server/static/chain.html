@@ -20,6 +20,15 @@
     }
   }
   </script>
+  <!--
+    web3.js / Anchor 在浏览器里仍会用到 Node 的 Buffer，而 chain.js 顶层第一句就是
+    Buffer.from("game")。ESM 依赖不会自动把它挂到全局，所以这里显式注入 polyfill。
+    普通 module script 按文档顺序执行，因此它一定在 chain.js 之前跑完。
+  -->
+  <script type="module">
+    import { Buffer } from "https://esm.sh/buffer@6.0.3?target=es2022";
+    globalThis.Buffer = Buffer;
+  </script>
   <script>
     // 防闪烁：在样式和页面绘制前套用主题，避免深色用户先看到一帧浅色
     try {

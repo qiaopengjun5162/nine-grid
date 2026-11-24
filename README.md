@@ -221,17 +221,21 @@ cargo run -p nine-grid-server
 | `msrv` | `rust-version = "1.94"` 不是一句空话 | `cargo +1.94.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
 | `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
+| `chain` | 链上单测 + 格式/lint，兼守 SBF 的 rustc 1.89 不被 MSRV 抬高 | `cargo test` + `fmt` + `clippy`（在 `chain/`，工具链 1.89） |
 
-本地一条命令对齐 CI：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）。
+本地一条命令对齐 CI 的主 workspace 部分：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）；链上那套用 `just chain-unit`（本地是 SBF 版，CI 是 1.89 稳定版守卫）。
 
-三个设计决定值得单独说：
+四个设计决定值得单独说：
 
 1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
    所以 CI 里起一个 `postgres:17` service，跑完整个 42 项冒烟。这一步的存在感比前面五个加起来还高。
 2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
    不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 后来改成 1.89 并由 CI 看着。
    再后来 `sqlx 0.9` 把门槛抬到 1.94，这个 job 又跟着升了一次。历史可以变，但「承诺必须被验证」这条没变。
-3. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
+3. **`chain` 用 1.89，故意不用主 workspace 的 1.94。** 链上程序由 Solana SBF 工具链编译，它内置的 rustc 固定在 1.89；
+   server 因 sqlx 0.9 需要 1.94，但 `core` 被链上复用，一旦 `core` 继承了 1.94，`anchor build` 就会报
+   `requires rustc 1.94`——2026-11 真发生过一次。这条 job 让回归在 push 时暴露，而不是等到本地编译。
+4. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
    （`cargo tree -i libsqlite3-sys` 在默认 target 下返回 `nothing to print`，根本没编译进产物），
    不是我们能升级的。用配置文件而不是 `--ignore` 参数，是为了让"为什么忽略"跟着代码一起走。
 

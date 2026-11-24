@@ -113,7 +113,7 @@ jobs:
       - name: cargo audit
         run: cargo audit
 
-  # 真正的端到端检查：起一个 Postgres，跑 migrations + 二进制 + 33 项冒烟。
+  # 真正的端到端检查：起一个 Postgres，跑 migrations + 二进制 + 42 项冒烟。
   # 这一步才验证"服务能启动、能落库、能下完一局"，单元测试替代不了。
   e2e:
     name: e2e（Postgres + smoke）
@@ -175,3 +175,34 @@ jobs:
           name: server-log
           path: /tmp/server.log
           if-no-files-found: ignore
+
+  # 链上程序由 Solana SBF 工具链编译，其 rustc 固定为 1.89。
+  # 这条 job 一箭双雕：既跑链上单测/格式/lint，又用同版本 rustc 当"MSRV 守卫"——
+  # 一旦 core 的 rust-version 被改回 1.94（就像 2026-11 那次 sqlx 升级），
+  # 这里会立刻报 "requires rustc 1.94"，不用等本地 anchor build 才发现。
+  chain:
+    name: chain（链上单测 + SBF 1.89 守卫）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chain
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.89.0"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: chain
+
+      - name: 链上单测（含 19683 棋盘一致性）
+        run: cargo test --locked
+
+      - name: 链上 rustfmt
+        run: cargo fmt --all -- --check
+
+      - name: 链上 clippy
+        run: cargo clippy --locked --all-targets -- -D warnings

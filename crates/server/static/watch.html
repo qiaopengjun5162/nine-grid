@@ -74,6 +74,15 @@
         <div class="board" id="watch-board" role="group" aria-label="九宫棋盘（观战，只读）"></div>
       </div>
 
+      <div class="replay-bar" id="watch-replay-bar" data-mode="live" aria-label="棋谱回放">
+        <button id="watch-replay-prev" class="ghost small" type="button" title="上一步">◀ 上一步</button>
+        <input id="watch-replay-range" class="replay-range" type="range"
+               min="0" max="0" value="0" step="1" aria-label="棋谱回放进度">
+        <button id="watch-replay-next" class="ghost small" type="button" title="下一步">下一步 ▶</button>
+        <span id="watch-replay-label" class="replay-label">第 0 / 0 手</span>
+        <button id="watch-replay-live" class="ghost small" type="button" disabled>回到实时</button>
+      </div>
+
       <details class="moves" open>
         <summary>棋谱 <span id="watch-ply-count">0</span> 手</summary>
         <ol id="watch-move-list"></ol>

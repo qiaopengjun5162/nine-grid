@@ -70,6 +70,10 @@
 自己不判胜负、不算轮次 —— 所以它和玩家端看到的是同一份服务端真相，不存在"观战端算出另一个结果"的可能。
 订阅前先拉一次快照，避免漏掉订阅之前的落子；每 15 秒一条心跳，防止反向代理掐断长连接。
 
+观战页还有一条**回放时间轴**：进度条 / 上一步 / 下一步可以把盘面逐手倒回任意时刻，
+「回到实时」一键归队。回放只按快照里的棋谱摆子，不自己判胜负；中间态不显示终局的胜利高亮，
+免得第 1 手就"提前宣布获胜"。有新的落子进来时，实时模式自动跟到最新，回放模式则停在你锁定的那一手。
+
 **战绩榜**（`/api/leaderboard`）只统计**真人对真人**的终局对局：
 判定人机局的办法是看这局有没有机器人座位（机器人就是一个 `player_id = BOT_ID` 的普通玩家行），
 有则整局排除。否则挂个简单机器人刷一百局就能霸榜，数字就没有意义了。
@@ -213,7 +217,7 @@ cargo run -p nine-grid-server
 |---|---|---|
 | `fmt` | 代码和 TOML 都别手搓格式 | `cargo fmt --check` + `taplo fmt --check` |
 | `clippy` | 没有"能编译但显然写错"的地方 | `cargo clippy --all-targets --all-features --tests --benches -- -D warnings` |
-| `test` | 26 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
+| `test` | 35 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
 | `msrv` | `rust-version = "1.94"` 不是一句空话 | `cargo +1.94.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
 | `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
@@ -255,7 +259,7 @@ DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
 
 ```bash
 just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
-cargo test                       # 31 个单元测试（core 22 + bot 9）
+cargo test                       # 35 个单元测试（core 22 + bot 13）
 bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
@@ -457,8 +461,8 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 页面默认 Devnet，可用 `?cluster=localnet` 切回本地验证器。
 devnet 上已用 Node 脚本实跑一局（建局→入座→落子→关局）全部通过。
 
-再往后才是可选项：给观战加回放时间轴、做跨局积分。
-（三档难度、SSE 观战、战绩榜、连 Phantom 的链上前端都已经落地，见下。）
+再往后才是可选项：做跨局积分。
+（三档难度、SSE 观战 + 回放时间轴、战绩榜、连 Phantom 的链上前端都已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。

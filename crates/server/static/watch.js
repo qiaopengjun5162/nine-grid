@@ -23,12 +23,37 @@ const ui = {
   plyCount: document.getElementById("watch-ply-count"),
   moveList: document.getElementById("watch-move-list"),
   leaveBtn: document.getElementById("watch-leave-btn"),
+  replayBar: document.getElementById("watch-replay-bar"),
+  replayRange: document.getElementById("watch-replay-range"),
+  replayLabel: document.getElementById("watch-replay-label"),
+  replayPrev: document.getElementById("watch-replay-prev"),
+  replayNext: document.getElementById("watch-replay-next"),
+  replayLive: document.getElementById("watch-replay-live"),
 };
 
 const state = {
   source: null,
+  room: null,
+  view: null,
   renderedPlies: 0,
+  followLive: true, // true：跟随最新快照；false：锁定在某一手回放
+  replayPly: 0,
 };
+
+// 从空盘逐手重放前 n 手，得到那一刻的盘面。
+// 只摆子、不判胜负 —— 胜负始终以服务端快照为准。
+function boardAfter(moves, n) {
+  const board = Array(9).fill("");
+  for (let i = 0; i < Math.min(n, moves.length); i += 1) {
+    board[moves[i].position] = moves[i].mark;
+  }
+  return board;
+}
+
+function displayPly() {
+  if (!state.view) return 0;
+  return state.followLive ? state.view.moves.length : state.replayPly;
+}
 
 function buildBoard() {
   ui.board.innerHTML = "";
@@ -64,26 +89,37 @@ function winningCells(view) {
 }
 
 function render(view) {
+  // 换了一局（或退出后重进）就重置回放基线
+  if (state.room !== view.code) {
+    state.room = view.code;
+    state.followLive = true;
+    state.replayPly = 0;
+    state.renderedPlies = 0;
+  }
+  state.view = view;
+
+  const ply = displayPly();
+  const isLive = state.followLive || ply >= view.moves.length;
+
   ui.roomCode.textContent = view.code;
   document.title = `${view.code} · 观战 · 九宫棋`;
-
-  // 换了一局就把动画基线归零
-  if (view.moves.length < state.renderedPlies) state.renderedPlies = 0;
-
   ui.seatOName.textContent = seatLabel(view.players.o, view);
   ui.seatXName.textContent = seatLabel(view.players.x, view);
-  ui.seatO.classList.toggle("active", view.state === "in_progress" && view.turn === "O");
-  ui.seatX.classList.toggle("active", view.state === "in_progress" && view.turn === "X");
+  ui.seatO.classList.toggle("active", isLive && view.state === "in_progress" && view.turn === "O");
+  ui.seatX.classList.toggle("active", isLive && view.state === "in_progress" && view.turn === "X");
 
-  renderStatus(view);
-  renderBoard(view);
-  renderMoves(view);
+  renderStatus(view, ply, isLive);
+  renderBoard(view, ply, isLive);
+  renderMoves(view, ply, isLive);
+  renderReplayControls(ply, view.moves.length);
 }
 
-function renderStatus(view) {
+function renderStatus(view, ply, isLive) {
   let text = "";
   let over = false;
-  if (view.state === "waiting") {
+  if (!isLive) {
+    text = `回放 · 第 ${ply} / ${view.moves.length} 手`;
+  } else if (view.state === "waiting") {
     text = "等对手入座中…";
   } else if (view.state === "in_progress") {
     text = `${view.turn} 方行棋`;
@@ -98,13 +134,14 @@ function renderStatus(view) {
   ui.status.classList.toggle("over", over);
 }
 
-function renderBoard(view) {
-  const winSet = new Set(winningCells(view));
-  const isNew = view.moves.length > state.renderedPlies;
-  const latest = isNew ? view.moves[view.moves.length - 1].position : -1;
+function renderBoard(view, ply, isLive) {
+  const board = boardAfter(view.moves, ply);
+  const winSet = new Set(isLive ? winningCells(view) : []);
+  // 只有前进到新的手数才播落子动画；回退时直接重画
+  const latest = ply > state.renderedPlies ? view.moves[ply - 1]?.position ?? -1 : -1;
 
   Array.from(ui.board.children).forEach((cell, index) => {
-    const mark = view.board[index] || "";
+    const mark = board[index] || "";
     if ((cell.dataset.mark || "") !== mark) {
       cell.dataset.mark = mark;
       cell.innerHTML = "";
@@ -117,18 +154,43 @@ function renderBoard(view) {
     }
     cell.classList.toggle("win", winSet.has(index));
   });
-  state.renderedPlies = view.moves.length;
+  state.renderedPlies = ply;
 }
 
-function renderMoves(view) {
+function renderMoves(view, ply, isLive) {
   ui.plyCount.textContent = String(view.moves.length);
   ui.moveList.innerHTML = view.moves
-    .map((move) => {
+    .map((move, i) => {
       const row = Math.floor(move.position / 3) + 1;
       const col = (move.position % 3) + 1;
-      return `<li><b>${move.mark}</b> 落在第 ${row} 行第 ${col} 列</li>`;
+      const cls = !isLive && i === ply - 1 ? ' class="current"' : "";
+      return `<li${cls}><b>${move.mark}</b> 落在第 ${row} 行第 ${col} 列</li>`;
     })
     .join("");
+}
+
+function renderReplayControls(ply, total) {
+  ui.replayRange.max = String(total);
+  ui.replayRange.value = String(ply);
+  ui.replayLabel.textContent = `第 ${ply} / ${total} 手`;
+  ui.replayPrev.disabled = ply <= 0;
+  ui.replayNext.disabled = ply >= total;
+  ui.replayLive.disabled = state.followLive;
+  ui.replayBar.dataset.mode = state.followLive ? "live" : "replay";
+}
+
+// 把视图定位到第 ply 手；拖到最新一手即回归实时跟随
+function seekPly(ply) {
+  if (!state.view) return;
+  const total = state.view.moves.length;
+  const next = Math.max(0, Math.min(total, ply));
+  if (next === total) {
+    state.followLive = true;
+  } else {
+    state.followLive = false;
+    state.replayPly = next;
+  }
+  render(state.view);
 }
 
 async function fetchView(code) {
@@ -174,6 +236,7 @@ function stopWatching() {
 
 function showLobby() {
   stopWatching();
+  state.view = null;
   ui.game.classList.add("hidden");
   ui.lobby.classList.remove("hidden");
   history.replaceState(null, "", location.pathname);
@@ -193,6 +256,13 @@ ui.codeInput.addEventListener("input", () => {
   ui.codeInput.value = ui.codeInput.value.toUpperCase();
 });
 ui.leaveBtn.addEventListener("click", showLobby);
+ui.replayRange.addEventListener("input", () => seekPly(Number(ui.replayRange.value)));
+ui.replayPrev.addEventListener("click", () => seekPly(displayPly() - 1));
+ui.replayNext.addEventListener("click", () => seekPly(displayPly() + 1));
+ui.replayLive.addEventListener("click", () => {
+  state.followLive = true;
+  if (state.view) render(state.view);
+});
 
 buildBoard();
 const initial = new URLSearchParams(location.search).get("room");

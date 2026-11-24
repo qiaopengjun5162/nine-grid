@@ -444,6 +444,9 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 
 - **无构建步骤**：Anchor 和 web3.js 通过 importmap 从 esm.sh 按 ESM 加载（版本与 `chain/package.json` 对齐），
   IDL 本地托管在 `/chain/idl.json` —— 页面是纯静态文件，不需要打包器。
+  ESM 依赖**不会**自动提供 Node 的全局 `Buffer`，而 `chain.js` 顶层第一句就是 `Buffer.from("game")`；
+  所以另有一行 `import { Buffer } from "esm.sh/buffer"` 挂到 `globalThis`，且必须排在 `chain.js` 前面
+  —— 少了它整个模块会在顶层崩溃、连钱包按钮都点不动。这条是踩过坑才补的，别删。
 - **Phantom → Anchor Wallet**：Phantom 注入的 `window.solana` 已经有 `publicKey` 和签名方法，
   补一层薄适配器就能喂给 `AnchorProvider`，不用引入整套 wallet-adapter。
 - **账户订阅代替轮询**：`connection.onAccountChange(pda, …)` 在账户变化时重新解码渲染，

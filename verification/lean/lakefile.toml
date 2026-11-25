@@ -1,0 +1,13 @@
+name = "ninegrid"
+version = "0.1.0"
+defaultTargets = ["NineGrid"]
+
+# 只依赖 Lean 4 core，不引 Mathlib：
+# 九宫棋是有限组合结构，core 的 decide/simp/omega 足够，且构建可离线复现。
+[[lean_lib]]
+name = "NineGrid"
+
+# 交叉验证工具：导出全部 19683 个棋盘的判胜结果，与 Rust core 比对。
+[[lean_exe]]
+name = "dump"
+root = "Dump"

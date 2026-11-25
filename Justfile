@@ -56,3 +56,11 @@ browser-e2e:
 # 链上 Rust 单测（含 19683 棋盘一致性，不需要验证器）
 chain-unit:
     cd chain && cargo test-sbf -p nine-grid
+
+# Lean 形式化验证：编译并检查全部定理（零 sorry，三条标准公理）
+lean-verify:
+    cd verification/lean && lake build
+
+# Lean ↔ Rust 交叉验证：比对全部 19683 个棋盘的判胜结果
+lean-compare:
+    bash verification/lean/compare.sh

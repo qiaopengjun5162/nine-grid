@@ -12,3 +12,6 @@ chain/test-ledger
 # 浏览器 E2E 脚本的 Python 缓存
 __pycache__/
 *.pyc
+
+# Lean 构建产物（定理源文件在 verification/lean/NineGrid/）
+verification/lean/.lake

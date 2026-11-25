@@ -120,14 +120,19 @@ nine-grid/
 │   └── 0002_bot_difficulty.sql
 ├── scripts/
 │   ├── smoke.sh                # 本地版 42 项端到端检查
-│   └── chain-test.sh           # 链上端到端：验证器+部署+10 项测试+前端交易验证，自包含
+│   ├── chain-test.sh           # 链上端到端：验证器+部署+10 项测试+前端交易验证，自包含
+│   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 一局
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
 │   │   └── src/{lib,state,errors}.rs
 │   ├── Anchor.toml
 │   └── tests/nine-grid.ts      # 10 项真实链上交易测试
+├── verification/lean/          # Lean 4 形式化验证：判胜规格 + 状态机不变量，零 sorry
+│   ├── NineGrid/{Basic,Winner,Game}.lean
+│   ├── Dump.lean               # 导出全部 19683 个棋盘的判胜结果
+│   └── compare.sh              # 与 Rust core 逐行交叉验证
 ├── .github/
-│   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e
+│   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e · chain
 │   ├── workflows/release.yml   # tag → 三平台 tar.gz + 自动发版说明
 │   ├── workflows/pages.yml     # 链上版前端 → GitHub Pages（Devnet）
 │   └── dependabot.yml
@@ -480,6 +485,56 @@ devnet 上已用 Node 脚本实跑一局（建局→入座→落子→关局）�
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：
 它只是坐在 X 座位上的一个普通玩家、走同一条 `/moves` 路径、留下的棋谱和真人下的没有区别。
 如果哪天它想自己判胜负，这个项目就毁了 —— 那意味着规则有了第二份实现。链上版同理。
+
+---
+
+## 十二、形式化验证：让规则自己证明自己
+
+测试回答"我试过的输入都对"，证明回答"**所有输入**都对"。`verification/lean/` 用 Lean 4
+把 `crates/core` 的规则重述了一遍，并用机器检查的证明给出四条承诺：
+
+| 证明 | 内容 |
+|---|---|
+| `winner_ne_none_iff` | 判胜的**完整规格**：有胜者 ⟺ 存在三连线（不漏判、不误判） |
+| `inProgress_no_winner` | 对局进行中的棋盘上没有任何三连 |
+| `terminal_no_apply` | 终局后任何落子都被拒绝 |
+| `reachable_not_both` | 可达状态下**双方不可能同时三连** |
+
+### 一个反例，说明为什么必须靠状态机
+
+`counterBoard_has_both_lines` 证明了一件反直觉的事：**在任意棋盘上，双方可以同时三连**
+（O 占第一行、X 占第二行）。所以"互斥"不是棋盘的定理，而是**可达状态**的定理 ——
+终局由一次落子产生，若那一手之后另一方也有线，它在落子前就已存在，
+而落子前对局还在进行、棋盘上不该有任何三连。
+
+这正是当初 Rust 穷举测试抓到的那个 bug 的一般化：问题不在判胜函数，而在"终局后还能不能落子"。
+
+### 与 Rust 的一致性怎么保证
+
+Lean 是**重述**而不是从 Rust 自动翻译，所以两者可能走偏。`compare.sh` 兜这个底：
+两边都把 `0..19682` 按三进制铺成棋盘、各自算 `winner`，输出后逐行 diff。
+
+```bash
+bash verification/lean/compare.sh
+# ✓ 两侧判胜结果完全一致（19683 个棋盘）
+```
+
+### 严格性
+
+- **零 `sorry`**，没有未完成的证明；
+- 只依赖 Lean 三条标准公理（`propext`、`Classical.choice`、`Quot.sound`）；
+- 不依赖 Mathlib —— 九宫棋是有限组合结构，core 的 `decide`/`cases`/`simp` 足够，
+  构建从分钟级降到秒级，也不需要联网拉依赖。
+
+### 边界（诚实比夸大有用）
+
+- **不证明 Rust 代码本身**。证明的是 Lean 这份规则；与 Rust 的一致性靠 19683 个棋盘的穷举比对。
+- **不建模存储、网络、链上**。`apply` 只覆盖规则判定；`RuleError` 错误码、
+  数据库事务、Anchor 账户校验都不在这一层。
+- **不验证 AI**。机器人策略不在形式化范围内。
+- 这套验证**不进 CI**：它只在规则变更时需要重跑，而 Lean 工具链体积大，
+  放进每次 push 不划算。改 `crates/core` 或 Lean 文件后本地跑一次即可
+  （`just lean-verify` / `just lean-compare`）。
 
 ---
 

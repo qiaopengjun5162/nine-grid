@@ -1344,6 +1344,19 @@ button:disabled { cursor: default; }
 [data-theme="cosmos"] .tx-state[data-kind="busy"] { color: var(--rust); }
 [data-theme="cosmos"] .tx-state[data-kind="ok"] { color: #6ee7a8; }
 [data-theme="cosmos"] .tx-state[data-kind="err"] { color: #ff9e80; }
+.funds-note {
+  background: rgba(156, 91, 60, 0.1);
+  border: 1px solid rgba(156, 91, 60, 0.28);
+  color: #8a4a2c;
+  word-break: break-all;
+}
+.funds-note a { color: inherit; text-decoration: underline; }
+[data-theme="cosmos"] .funds-note {
+  background: rgba(255, 209, 102, 0.08);
+  border-color: rgba(255, 209, 102, 0.3);
+  color: var(--gold);
+}
+
 [data-theme="cosmos"] .network-note {
   background: rgba(72, 214, 232, 0.08);
   border: 1px solid rgba(72, 214, 232, 0.22);

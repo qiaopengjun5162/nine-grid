@@ -1,7 +1,7 @@
 name: Pages
 
 # 把链上版前端发布到 GitHub Pages。
-# 只发布纯静态、无需后端的页面（链上对局 / 链上棋谱馆）；
+# 只发布纯静态、无需后端的页面（链上对局 / 链上棋谱馆 / 项目介绍页）；
 # 主页与观战页依赖后端 API，在纯静态托管上跑不了，所以不发布（页面里的链接在 Pages 上会自动隐藏）。
 #
 # 发布后地址：https://<用户名>.github.io/nine-grid/
@@ -16,6 +16,7 @@ on:
       - "crates/server/static/chain-archive.js"
       - "crates/server/static/style.css"
       - "crates/server/static/theme.js"
+      - "crates/server/static/showcase.html"
       - "crates/server/static/chain/idl.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:

@@ -65,6 +65,7 @@ const ui = {
   connectBtn: document.getElementById("connect-btn"),
   walletAddr: document.getElementById("wallet-addr"),
   networkNote: document.getElementById("network-note"),
+  fundsNote: document.getElementById("funds-note"),
   createBtn: document.getElementById("chain-create-btn"),
   joinForm: document.getElementById("chain-join-form"),
   pdaInput: document.getElementById("chain-pda-input"),
@@ -225,6 +226,7 @@ function onConnected(pubkey) {
   ui.createBtn.disabled = false;
   ui.joinBtn.disabled = false;
   checkNetwork();
+  warnIfNoFunds(key);
 
   // 若 URL 带了 ?pda=，直接进那局
   const pda = new URLSearchParams(location.search).get("pda");
@@ -246,6 +248,36 @@ async function checkNetwork() {
     ui.networkNote.textContent += isLocalnet
       ? " 但 RPC 不可达 —— 本地验证器起了吗？"
       : " 但 RPC 不可达 —— 检查网络。";
+  }
+}
+
+// 新钱包最常见的第一个坑：余额为 0，建局时付不出账户租金，
+// 只会拿到一句 "Attempt to debit an account but found no record of a prior credit"。
+// 与其让人对着这句话猜，不如直接告诉他去哪儿领。
+async function warnIfNoFunds(owner) {
+  const el = ui.fundsNote;
+  if (!el) return;
+  el.classList.add("hidden");
+  try {
+    const lamports = await state.connection.getBalance(owner);
+    if (lamports > 0) return;
+    el.textContent = "";
+    if (isLocalnet) {
+      el.textContent =
+        "这个钱包在本地验证器上余额为 0。先领一点再建局：" +
+        `solana airdrop 2 ${owner.toBase58()} --url ${RPC_URL}`;
+    } else {
+      el.append("这个钱包在 Devnet 上没有 SOL，建局付不出账户租金。先去 ");
+      const a = document.createElement("a");
+      a.href = "https://faucet.solana.com/?cluster=devnet";
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "水龙头";
+      el.append(a, " 领 1 SOL，回来刷新页面即可。");
+    }
+    el.classList.remove("hidden");
+  } catch {
+    // 余额查不到（RPC 限流等）就不打扰，别把网络问题说成没余额
   }
 }
 

@@ -113,7 +113,7 @@ nine-grid/
 │       ├── src/events.rs       # 房间事件总线（SSE 观战用）
 │       ├── src/error.rs        # 规则错误 → HTTP 状态码
 │       ├── src/config.rs
-│       └── static/             # index / watch / chain / chain-archive + 对应 js（无构建步骤）
+│       └── static/             # index / watch / chain / chain-archive / showcase + 对应 js（无构建步骤）
 │           └── chain/idl.json  # 链上 IDL，从 chain/target/idl 复制，随合约提交
 ├── migrations/
 │   ├── 0001_init.sql
@@ -358,6 +358,17 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 创建者 `close_game` 之后账户消失，该局不再出现在列表里 —— 但交易仍在链上，
 所以这一页只承诺「列出还没被关掉的局」。浏览器 E2E 会建三局（O 胜 / X 胜 / 等待入座），
 关掉其中一局，再去棋谱馆核对统计、还原 5 手棋谱并比对盘面。
+
+### 项目介绍页：`/showcase.html`
+
+`crates/server/static/showcase.html` 是一份单文件的演示稿，12 页，讲「为什么做 / 它是什么 /
+能做什么 / 五层验证 / 优劣势 / 完成度 / 怎么用 / 下一步」，每页带讲稿。
+
+- `←` `→` 或空格翻页，`#5` 这样的地址可以直接定位到某一页；
+- `N` 开讲稿，`F` 全屏，`P` 打印成 PDF（16:9，一页一屏）；
+- 零外部依赖：不联网、不加载字体和脚本，双击文件就能放。
+
+线上地址：`/showcase.html`（沿 Pages 一起发布，和链上页同一套静态目录）。
 
 ### 为什么没有上 Bevy
 

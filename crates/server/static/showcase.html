@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="cosmos">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>九宫棋 · 项目介绍</title>
+<meta name="description" content="九宫棋：一个引擎、三个宿主；一份规则，可以被机器证明。" />
+<style>
+  :root{
+    --ink:#eef3ff; --muted:#93a4c4; --dim:#6b7c9c;
+    --cyan:#48d6e8; --gold:#ffd166; --jade:#35c48f; --cinnabar:#e2704a;
+    --hair:rgba(140,180,255,.18); --panel:rgba(255,255,255,.045);
+    --serif:"Songti SC","STSong","Noto Serif CJK SC",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#060b18;color:var(--ink);font-family:var(--sans);overflow:hidden}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    background:
+      radial-gradient(1200px 700px at 78% -10%, rgba(72,214,232,.14), transparent 60%),
+      radial-gradient(900px 600px at 8% 108%, rgba(255,209,102,.08), transparent 60%),
+      #060b18;
+  }
+  /* 星点：两层静态，一层极慢闪烁 */
+  body::before,body::after{content:"";position:fixed;inset:0;pointer-events:none}
+  body::before{
+    background-image:
+      radial-gradient(1.2px 1.2px at 12% 22%, rgba(255,255,255,.55), transparent),
+      radial-gradient(1px 1px at 34% 68%, rgba(200,235,255,.45), transparent),
+      radial-gradient(1.4px 1.4px at 58% 14%, rgba(255,255,255,.4), transparent),
+      radial-gradient(1px 1px at 71% 52%, rgba(190,225,255,.5), transparent),
+      radial-gradient(1.2px 1.2px at 88% 34%, rgba(255,255,255,.45), transparent),
+      radial-gradient(1px 1px at 46% 86%, rgba(200,235,255,.35), transparent),
+      radial-gradient(1.1px 1.1px at 93% 78%, rgba(255,255,255,.4), transparent),
+      radial-gradient(1px 1px at 22% 92%, rgba(200,235,255,.3), transparent);
+  }
+  body::after{
+    background-image:
+      radial-gradient(1.6px 1.6px at 18% 44%, rgba(72,214,232,.5), transparent),
+      radial-gradient(1.4px 1.4px at 64% 76%, rgba(255,209,102,.4), transparent),
+      radial-gradient(1.3px 1.3px at 82% 12%, rgba(72,214,232,.35), transparent);
+    animation:twinkle 7s ease-in-out infinite alternate;
+  }
+  @keyframes twinkle{from{opacity:.35}to{opacity:.85}}
+
+  #stage{width:1280px;height:720px;position:relative;transform-origin:center center;flex:none}
+
+  .slide{
+    position:absolute;inset:0;padding:64px 84px 60px;
+    display:none;flex-direction:column;
+    opacity:0;transform:translateY(10px);
+  }
+  .slide.active{display:flex;animation:enter .34s ease forwards}
+  @keyframes enter{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){
+    body::after{animation:none;opacity:.6}
+    .slide.active{animation:none;opacity:1;transform:none}
+  }
+
+  .eyebrow{
+    display:flex;align-items:center;gap:12px;
+    font-size:12px;letter-spacing:.26em;color:var(--cyan);
+    text-transform:uppercase;margin-bottom:18px;
+  }
+  .eyebrow::after{content:"";height:1px;flex:1;background:linear-gradient(90deg,var(--hair),transparent)}
+  .eyebrow b{color:var(--gold);font-weight:500;letter-spacing:.18em}
+
+  h1{font-family:var(--serif);font-size:78px;line-height:1.08;margin:0;font-weight:600;letter-spacing:.04em}
+  h2{font-family:var(--serif);font-size:42px;line-height:1.25;margin:0 0 8px;font-weight:600;letter-spacing:.03em}
+  h3{font-size:16px;margin:0;font-weight:500;letter-spacing:.02em}
+  p{margin:0;color:var(--muted);line-height:1.75}
+
+  .lede{font-size:19px;color:#c7d6ee;line-height:1.8;max-width:880px}
+  .small{font-size:13px;color:var(--dim);line-height:1.7}
+  .mono{font-family:var(--mono);font-size:.92em;letter-spacing:-.01em}
+  .cyan{color:var(--cyan)} .gold{color:var(--gold)} .jade{color:var(--jade)} .cinnabar{color:var(--cinnabar)}
+
+  .foot{
+    position:absolute;left:84px;right:84px;bottom:30px;
+    display:flex;justify-content:space-between;align-items:center;
+    font-size:11px;letter-spacing:.2em;color:#5a6b8c;
+  }
+  .foot .pg{font-variant-numeric:tabular-nums}
+
+  /* ── 封面 ── */
+  .cover{padding-top:96px}
+  .cover .tagline{font-size:12px;letter-spacing:.3em;color:var(--gold);margin-bottom:26px}
+  .cover h1 span{color:var(--cyan)}
+  .cover .sub{margin-top:22px;font-size:20px;color:#c2d1e8;line-height:1.85;max-width:600px}
+  .cover .meta{margin-top:auto;display:flex;gap:28px;font-size:12px;color:var(--dim);letter-spacing:.12em}
+  .cover .meta b{color:var(--ink);font-weight:500}
+  .cover-board{
+    position:absolute;right:96px;top:118px;width:372px;
+    display:grid;grid-template-columns:repeat(3,112px);gap:18px;
+    transform:rotate(-6deg);transform-origin:center;
+  }
+  .cb{
+    height:112px;border-radius:18px;position:relative;
+    background:linear-gradient(160deg,rgba(72,214,232,.10),rgba(72,214,232,.02));
+    border:1px solid rgba(125,175,255,.22);
+    box-shadow:inset 0 0 32px rgba(72,214,232,.08);
+  }
+  .cb::after{content:"";position:absolute;inset:0;border-radius:18px;background:radial-gradient(circle at 50% 120%,rgba(72,214,232,.16),transparent 70%)}
+  .stone{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+  .stone.o{width:56px;height:56px;border-radius:50%;border:5px solid var(--cyan);box-shadow:0 0 22px rgba(72,214,232,.55),inset 0 0 14px rgba(72,214,232,.35)}
+  .stone.x{width:56px;height:56px}
+  .stone.x::before,.stone.x::after{content:"";position:absolute;left:50%;top:50%;width:60px;height:6px;border-radius:3px;background:linear-gradient(90deg,#7a4a08,var(--gold),#fff0c0,var(--gold));box-shadow:0 0 16px rgba(255,209,102,.45)}
+  .stone.x::before{transform:translate(-50%,-50%) rotate(45deg)}
+  .stone.x::after{transform:translate(-50%,-50%) rotate(-45deg)}
+
+  /* ── 通用块 ── */
+  .cols{display:grid;gap:26px;margin-top:26px}
+  .cols.c3{grid-template-columns:repeat(3,1fr)}
+  .cols.c4{grid-template-columns:repeat(4,1fr)}
+  .item{border-top:1px solid var(--hair);padding-top:16px}
+  .item .n{font-family:var(--mono);font-size:12px;color:var(--cyan);letter-spacing:.12em}
+  .item h3{margin:8px 0 8px}
+  .item p{font-size:13.5px;line-height:1.75}
+
+  /* 有底部说明的页：内容块与说明各占一半余量，避免内容贴顶、说明贴底 */
+  .slide > .arch, .slide > .feat, .slide > .layers, .slide > .ways, .slide > .steps, .slide > .split { margin-top:auto; }
+  .body{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
+  .body .quote{margin-top:46px}
+  .quote{
+    margin-top:auto;font-family:var(--serif);font-size:24px;color:#dfe9fb;
+    padding-left:18px;border-left:2px solid var(--gold);line-height:1.7;
+  }
+
+  /* ── 架构 ── */
+  .arch{margin-top:30px}
+  .core-bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:20px 26px;border-radius:14px;
+    background:linear-gradient(90deg,rgba(72,214,232,.14),rgba(72,214,232,.04));
+    border:1px solid rgba(72,214,232,.35);
+  }
+  .core-bar b{font-family:var(--serif);font-size:22px;letter-spacing:.06em}
+  .core-bar span{font-size:13px;color:#a9c6e0}
+  .drops{display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:0}
+  .drop{height:34px;position:relative}
+  .drop::before{content:"";position:absolute;left:50%;top:0;width:1px;height:34px;background:linear-gradient(180deg,var(--hair),transparent)}
+  .host{
+    padding:20px 22px;border-radius:12px;border:1px solid var(--hair);
+    background:var(--panel);min-height:170px;
+  }
+  .host .k{font-family:var(--mono);font-size:11.5px;color:var(--cyan);letter-spacing:.04em}
+  .host h3{margin:6px 0 10px;font-size:17px}
+  .host p{font-size:13px;line-height:1.7}
+
+  /* ── 功能格 ── */
+  .feat{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:26px}
+  .feat .f{
+    padding:20px 18px 18px;min-height:134px;border-radius:12px;border:1px solid var(--hair);
+    background:linear-gradient(165deg,rgba(255,255,255,.05),rgba(255,255,255,.01));
+  }
+  .feat .f .k{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.16em}
+  .feat .f h3{font-size:15px;margin:8px 0 6px}
+  .feat .f p{font-size:12.5px;line-height:1.65}
+
+  /* ── 验证层 ── */
+  .layers{margin-top:22px;display:flex;flex-direction:column;gap:0}
+  .layer{display:grid;grid-template-columns:120px 1fr 300px;gap:20px;align-items:center;padding:17px 0;border-top:1px solid var(--hair)}
+  .layer:last-child{border-bottom:1px solid var(--hair)}
+  .layer .num{font-family:var(--serif);font-size:34px;color:var(--cyan);font-variant-numeric:tabular-nums;line-height:1}
+  .layer .num small{font-size:13px;color:var(--dim);margin-left:6px;font-family:var(--sans)}
+  .layer h3{font-size:16px}
+  .layer p{font-size:13px;line-height:1.6}
+
+  /* ── 反例 ── */
+  .versus{display:grid;grid-template-columns:1fr 1fr;gap:34px;margin-top:22px}
+  .vpanel{border:1px solid var(--hair);border-radius:14px;padding:20px 22px;background:var(--panel)}
+  .vhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+  .vhead h3{font-size:15px}
+  .vhead span{font-size:11px;letter-spacing:.14em;color:var(--dim)}
+  .mini{display:grid;grid-template-columns:repeat(3,46px);gap:7px}
+  .mini div{width:46px;height:46px;border-radius:9px;background:rgba(125,175,255,.08);border:1px solid rgba(125,175,255,.16);position:relative}
+  .mini .o::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;border:3px solid var(--jade)}
+  .mini .x::after,.mini .x::before{content:"";position:absolute;left:50%;top:50%;width:26px;height:3.5px;border-radius:2px;background:var(--cinnabar)}
+  .mini .x::before{transform:translate(-50%,-50%) rotate(45deg)}
+  .mini .x::after{transform:translate(-50%,-50%) rotate(-45deg)}
+  .vpanel p{font-size:13px;margin-top:14px;line-height:1.7}
+
+  /* ── 优劣 ── */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:24px}
+  .split .hd{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .dot.g{background:var(--jade);box-shadow:0 0 10px rgba(53,196,143,.6)}
+  .dot.r{background:var(--cinnabar);box-shadow:0 0 10px rgba(226,112,74,.6)}
+  .list{list-style:none;margin:0;padding:0}
+  .list li{padding:12px 0;border-top:1px solid var(--hair);font-size:14px;line-height:1.65;color:#cbd8ec;display:flex;gap:12px}
+  .list li .i{font-family:var(--mono);font-size:11px;color:var(--dim);padding-top:3px;flex:none}
+
+  /* ── 表格 ── */
+  table{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}
+  th{text-align:left;font-weight:500;font-size:11.5px;letter-spacing:.16em;color:var(--dim);padding:0 0 10px;border-bottom:1px solid var(--hair)}
+  td{padding:11px 0;border-bottom:1px solid rgba(140,180,255,.09);color:#cfdbee}
+  td:first-child{font-family:var(--serif);font-size:16px;letter-spacing:.04em}
+  td.note{color:var(--muted);font-size:12.5px}
+  .chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;letter-spacing:.06em;border:1px solid;white-space:nowrap}
+  .chip.ok{color:var(--jade);border-color:rgba(53,196,143,.4);background:rgba(53,196,143,.08)}
+  .chip.warn{color:var(--gold);border-color:rgba(255,209,102,.4);background:rgba(255,209,102,.07)}
+  .chip.no{color:var(--cinnabar);border-color:rgba(226,112,74,.4);background:rgba(226,112,74,.07)}
+
+  /* ── 三步用 ── */
+  .ways{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:22px}
+  .way{border:1px solid var(--hair);border-radius:14px;padding:20px 22px;background:var(--panel);display:flex;flex-direction:column;min-height:250px}
+  .way .who{font-size:11.5px;letter-spacing:.18em;color:var(--cyan);margin-bottom:8px}
+  .way h3{font-size:17px;margin-bottom:12px}
+  .way ol{margin:0;padding-left:18px;color:#c6d4ea;font-size:13px;line-height:1.9}
+  .way pre{
+    margin:12px 0 0;padding:11px 12px;border-radius:9px;overflow:auto;
+    background:rgba(4,10,24,.62);border-left:2px solid rgba(72,214,232,.5);
+    font-family:var(--mono);font-size:11.5px;line-height:1.75;color:#b9d8ea;
+  }
+  .way .foot-note{margin-top:auto;padding-top:12px;font-size:11.5px;color:var(--dim)}
+
+  /* ── 演示路线 ── */
+  .steps{display:flex;flex-direction:column;gap:0;margin-top:20px}
+  .step{display:grid;grid-template-columns:64px 1fr 96px;align-items:center;gap:18px;padding:16px 0;border-top:1px solid var(--hair)}
+  .step:last-child{border-bottom:1px solid var(--hair)}
+  .step .t{font-family:var(--mono);font-size:12px;color:var(--gold)}
+  .step h3{font-size:16px;margin-bottom:4px}
+  .step p{font-size:13px}
+  .step .dur{text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+
+  /* ── 结尾 ── */
+  .end{align-items:flex-start;justify-content:center}
+  .end h1{font-size:64px}
+  .end .links{margin-top:30px;display:flex;flex-direction:column;gap:10px;font-family:var(--mono);font-size:15px}
+  .end a{color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(72,214,232,.3)}
+  .end .kicker{margin-top:36px;font-family:var(--serif);font-size:22px;color:#dfe9fb}
+  .end-board{opacity:.15;transform:rotate(-5deg) scale(.9);top:150px;right:70px;pointer-events:none}
+
+  /* ── 控件 ── */
+  #bar{position:fixed;left:0;top:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--gold));width:0;z-index:20;transition:width .3s ease}
+  #ctrl{position:fixed;right:20px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:20;opacity:.3;transition:opacity .2s}
+  #ctrl:hover{opacity:1}
+  #ctrl button{
+    width:34px;height:34px;border-radius:9px;border:1px solid var(--hair);
+    background:rgba(10,20,40,.7);color:#cfe0f5;font-size:14px;cursor:pointer;
+  }
+  #ctrl button:hover{border-color:rgba(72,214,232,.5);color:var(--cyan)}
+  #notes{
+    position:fixed;left:0;right:0;bottom:0;z-index:30;display:none;
+    padding:18px 28px 22px;background:rgba(6,12,26,.94);
+    border-top:1px solid rgba(72,214,232,.3);font-size:13.5px;line-height:1.8;color:#c6d4ea;
+  }
+  #notes.on{display:block}
+  #notes b{color:var(--cyan);font-weight:500;letter-spacing:.14em;font-size:11px}
+  #hint{
+    position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;
+    font-size:11px;color:#4d5d7d;letter-spacing:.1em;white-space:nowrap;
+  }
+
+  @media print{
+    @page{size:1280px 720px;margin:0}
+    html,body{overflow:visible;background:#060b18}
+    body{display:block}
+    #stage{transform:none!important;width:auto;height:auto}
+    .slide{display:flex!important;position:relative;inset:auto;width:1280px;height:720px;opacity:1;transform:none;animation:none;break-after:page;page-break-after:always}
+    .slide:last-child{break-after:auto;page-break-after:auto}
+    #bar,#ctrl,#notes,#hint{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="stage">
+
+  <!-- 01 封面 -->
+  <section class="slide cover active" data-notes="开场别报技术栈。先说一句：这是一个把「规则」本身当作交付物的项目 —— 不只是能下棋，而是规则可以被机器验证。">
+    <div class="tagline">SOLANA DEVNET · 2026.11</div>
+    <h1>九宫<span>棋</span></h1>
+    <p class="sub">一个引擎，三个宿主。<br />一份规则，可以被机器证明。</p>
+    <div class="meta">
+      <span>Rust · axum · Anchor</span>
+      <span>35 单测 · 42 冒烟 · 21 定理</span>
+      <span><b>MIT</b></span>
+    </div>
+    <div class="cover-board">
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"></div>
+      <div class="cb"><i class="stone o"></i></div>
+    </div>
+    <div class="foot"><span>NINE GRID</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 02 为什么 -->
+  <section class="slide" data-notes="三个动机按「工程 → 验证 → 真实性」排列。重点落在第三点：九宫棋小到能证完，但它会踩到的坑（终局冻结、并发、租金）跟大项目是同一类。">
+    <div class="eyebrow"><b>01</b> 为什么做这个</div>
+    <h2>拿一个最熟的游戏，<br />把整条链路走完</h2>
+    <div class="body">
+    <div class="cols c3">
+      <div class="item">
+        <div class="n">A / 复用</div>
+        <h3>规则只写一次</h3>
+        <p>服务端、机器人、链上程序各写一遍判胜，是最容易产生分歧的写法。想验证：一套 core 能不能同时喂给三端。</p>
+      </div>
+      <div class="item">
+        <div class="n">B / 验证</div>
+        <h3>把规则证明到底</h3>
+        <p>链游 demo 多停在「能转账」，规则本身几乎没人证。九宫棋小到可以 3⁹ 穷举，也小到可以把定理写完。</p>
+      </div>
+      <div class="item">
+        <div class="n">C / 真实性</div>
+        <h3>让真问题露头</h3>
+        <p>终局冻结、轮次、并发写入、账户租金、钱包网络不一致 —— 这些只有在完整链路上才会真的发生。</p>
+      </div>
+    </div>
+    <div class="quote">规则小到能证完，链路长到能踩坑。</div>
+    </div>
+    <div class="foot"><span>为什么做</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 03 架构 -->
+  <section class="slide" data-notes="强调「判胜只有一份实现」。链上账户用 u8 编码，进出都过同一套规则；这也是后面 Lean 与 Rust 能做逐格比对的前提。">
+    <div class="eyebrow"><b>02</b> 它是什么</div>
+    <h2>一个引擎，三个宿主</h2>
+    <div class="arch">
+      <div class="core-bar">
+        <b>nine-grid-core</b>
+        <span>纯规则 · 无 IO · 22 个单测 · 3⁹ 穷举</span>
+      </div>
+      <div class="drops"><div class="drop"></div><div class="drop"></div><div class="drop"></div></div>
+      <div class="drops">
+        <div class="host">
+          <div class="k">nine-grid-server</div>
+          <h3>服务端</h3>
+          <p>axum + Postgres。房间码、落子、SSE 观战、回放、战绩榜。</p>
+        </div>
+        <div class="host">
+          <div class="k">nine-grid-bot</div>
+          <h3>机器人</h3>
+          <p>minimax + α-β 剪枝，三档强度共用一套搜索，只在「怎么挑」上分叉。</p>
+        </div>
+        <div class="host">
+          <div class="k">nine-grid (Anchor)</div>
+          <h3>链上程序</h3>
+          <p>create / join / play / close。PDA 托管棋局，关局退租金。</p>
+        </div>
+      </div>
+    </div>
+    <p class="small" style="margin-top:26px">判胜只有一份实现：<span class="mono">winner()</span> 被三端共同调用。链上账户以 u8 编码，进出都过同一套规则 —— 这也是后面能与 Lean 逐格比对的前提。</p>
+    <div class="foot"><span>架构</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 04 功能 -->
+  <section class="slide" data-notes="这一页不用逐条念。挑三个讲：邀请链接自动入座、困难档每步最优、棋谱馆从交易重建棋谱 —— 其余留给观众自己看。">
+    <div class="eyebrow"><b>03</b> 能做什么</div>
+    <h2>从开一局，到查一局</h2>
+    <div class="feat">
+      <div class="f"><div class="k">01</div><h3>房间码与邀请链接</h3><p>6 位码开局，链接打开自动入座执 X，不用注册。</p></div>
+      <div class="f"><div class="k">02</div><h3>三档机器人</h3><p>困难档每步最优，你最多逼平；简单档你赢得动。</p></div>
+      <div class="f"><div class="k">03</div><h3>实时观战</h3><p>SSE 推送，另一个窗口就能看这盘棋。</p></div>
+      <div class="f"><div class="k">04</div><h3>回放时间轴</h3><p>逐手回退，看胜线是在哪一手形成的。</p></div>
+      <div class="f"><div class="k">05</div><h3>战绩榜</h3><p>只统计真人对真人，机器人局不进榜，防刷。</p></div>
+      <div class="f"><div class="k">06</div><h3>链上对局</h3><p>Phantom 签名，PDA 托管，关局退回租金。</p></div>
+      <div class="f"><div class="k">07</div><h3>链上棋谱馆</h3><p>账户只存终局快照；棋谱从交易里重建，并与账户比对。</p></div>
+      <div class="f"><div class="k">08</div><h3>双主题</h3><p>古典与星穹会员版，一键切换，共用同一份 DOM。</p></div>
+    </div>
+    <p class="small" style="margin-top:auto">八项都能在页面上直接点，不需要安装；只有链上那两项要 Phantom 和一点 Devnet 测试 SOL。</p>
+    <div class="foot"><span>功能</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 05 验证 -->
+  <section class="slide" data-notes="这一页是全场的硬通货。说清每层挡的是不同的事：单测挡规则错，冒烟挡服务起不来，链上 E2E 挡账户与指令错，浏览器 E2E 挡按钮没连上，定理挡「想当然」。">
+    <div class="eyebrow"><b>04</b> 验证密度</div>
+    <h2>五层验证，每层挡不同的东西</h2>
+    <div class="layers">
+      <div class="layer"><div class="num">35<small>个</small></div><h3>单元测试</h3><p>规则对不对。core 22 + bot 13，含 3⁹ 穷举与「机器人 200 局不输」。</p></div>
+      <div class="layer"><div class="num">42<small>项</small></div><h3>端到端冒烟</h3><p>真 Postgres + 真二进制。服务能不能起来、落库是不是真的、拒绝分支全不全。</p></div>
+      <div class="layer"><div class="num">10<small>项</small></div><h3>链上 E2E</h3><p>真验证器 + 真交易。完整对局、全部拒绝分支、终局冻结、关账户退租金。</p></div>
+      <div class="layer"><div class="num">3<small>局</small></div><h3>浏览器 E2E</h3><p>模拟 Phantom 走真实 UI：连钱包 → 建局 → 入座 → 落子 → 判胜 → 棋谱馆。</p></div>
+      <div class="layer"><div class="num">21<small>条</small></div><h3>形式化定理</h3><p>零 <span class="mono">sorry</span>。规则在任意输入上成不成立，以及它在什么前提下才成立。</p></div>
+    </div>
+    <p class="small" style="margin-top:18px">CI 共 8 个 job（fmt / clippy / test / msrv / audit / e2e / chain / lean），每个都在替一句具体的话担保；证明里出现 <span class="mono">sorry</span> 直接红灯。</p>
+    <div class="foot"><span>验证</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 06 反例 -->
+  <section class="slide" data-notes="这是最值得讲的一页。左边是「你想当然的命题」，右边是「实际能走到的状态」。证明的价值不是点头，是告诉你这句话在什么条件下才成立。">
+    <div class="eyebrow"><b>05</b> 形式化</div>
+    <h2>证明最有用的时刻，<br />是它说「你这句是假的」</h2>
+    <div class="versus">
+      <div class="vpanel">
+        <div class="vhead"><h3>随便画一个棋盘</h3><span>反例存在</span></div>
+        <div class="mini">
+          <div class="o"></div><div class="o"></div><div class="o"></div>
+          <div class="x"></div><div class="x"></div><div class="x"></div>
+          <div></div><div></div><div></div>
+        </div>
+        <p class="cinnabar">O 三连，X 也三连 —— 「双方不可能同时三连」在任意棋盘上是<span style="color:var(--ink)">假的</span>。</p>
+      </div>
+      <div class="vpanel">
+        <div class="vhead"><h3>按规则真下出来的一局</h3><span>恒成立</span></div>
+        <div class="mini">
+          <div class="o"></div><div class="x"></div><div class="x"></div>
+          <div class="x"></div><div class="o"></div><div></div>
+          <div></div><div></div><div class="o"></div>
+        </div>
+        <p class="jade">终局之后规则拒绝再落子，所以互斥对<span style="color:var(--ink)">可达状态</span>恒成立。</p>
+      </div>
+    </div>
+    <p class="lede" style="margin-top:24px;font-size:16px">所以修 bug 不是加一个 <span class="mono cyan">if</span> 兜底，而是把不变量放回状态机 —— 定理 <span class="mono cyan">reachable_not_both</span> 说的就是这件事。</p>
+    <div class="foot"><span>形式化</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 07 优劣 -->
+  <section class="slide" data-notes="劣势要主动讲，讲完可信度才立得住。这四条里，前两条是工程缺口，后两条是产品缺口。">
+    <div class="eyebrow"><b>06</b> 优劣势</div>
+    <h2>强在规则，弱在产品</h2>
+    <div class="split">
+      <div>
+        <div class="hd"><i class="dot g"></i><h3 class="jade">优势</h3></div>
+        <ul class="list">
+          <li><span class="i">01</span><span>规则单一来源，三端共用；改一处不会各自漂移。</span></li>
+          <li><span class="i">02</span><span>验证密度高：单测 → 冒烟 → 链上 → 浏览器 → 定理，五层各自兜底。</span></li>
+          <li><span class="i">03</span><span>前端无需构建：一个静态目录就能跑，Pages 可直接托管。</span></li>
+          <li><span class="i">04</span><span>可核查：棋谱从交易重建，任何人能自己验一遍。</span></li>
+        </ul>
+      </div>
+      <div>
+        <div class="hd"><i class="dot r"></i><h3 class="cinnabar">劣势</h3></div>
+        <ul class="list">
+          <li><span class="i">01</span><span>未审计、未上主网，目前只跑在 Devnet。</span></li>
+          <li><span class="i">02</span><span>服务端没有托管版：想玩本地版得自备 Postgres。</span></li>
+          <li><span class="i">03</span><span>真机 Phantom 弹窗只做过自动化模拟，没人工走查。</span></li>
+          <li><span class="i">04</span><span>玩法深度有限：无账号、社交、经济系统，留存靠不住。</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="small" style="margin-top:auto">验证密度是它值得被信任的理由；产品缺口是它还不该被推广的理由。</p>
+    <div class="foot"><span>优劣势</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 08 完成度 -->
+  <section class="slide" data-notes="结论要一句话说清：演示和内测可以用，公开运营还不够。缺口只有两处是硬的 —— 托管部署和安全审计。">
+    <div class="eyebrow"><b>07</b> 完成度</div>
+    <h2>能演示、能内测，<br />还不能当公开产品</h2>
+    <table>
+      <thead><tr><th>模块</th><th style="width:130px">状态</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>本地对战与三档 bot</td><td><span class="chip ok">可用</span></td><td class="note">需自备 Postgres；一条命令起服务</td></tr>
+        <tr><td>观战与回放</td><td><span class="chip ok">可用</span></td><td class="note">SSE 实时推送 + 逐手回退</td></tr>
+        <tr><td>链上对局</td><td><span class="chip ok">可用</span></td><td class="note">Devnet，需 Phantom 与少量测试 SOL</td></tr>
+        <tr><td>链上棋谱馆</td><td><span class="chip ok">可用</span></td><td class="note">公共 RPC 可能禁枚举，单局查询不受影响</td></tr>
+        <tr><td>形式化证明</td><td><span class="chip ok">可用</span></td><td class="note">21 条定理，已进 CI，改规则即重证</td></tr>
+        <tr><td>托管服务端</td><td><span class="chip warn">待补</span></td><td class="note">要让人「打开就能下」，还差一次部署</td></tr>
+        <tr><td>审计与主网</td><td><span class="chip no">未做</span></td><td class="note">主网前必须做，不能跳</td></tr>
+      </tbody>
+    </table>
+    <div class="foot"><span>完成度</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 09 怎么用 -->
+  <section class="slide" data-notes="三类人三条路径。观众只需要第一条，两分钟能下上；技术同学看第三条。注意提醒：链上版要先在 Phantom 里切到 Devnet 并领测试币。">
+    <div class="eyebrow"><b>08</b> 怎么用</div>
+    <h2>三类人，三条路</h2>
+    <div class="ways">
+      <div class="way">
+        <div class="who">A / 只想玩</div>
+        <h3>打开链接就能下</h3>
+        <ol>
+          <li>装 Phantom 钱包</li>
+          <li>网络切到 Devnet</li>
+          <li>领 1 SOL 测试币</li>
+          <li>建局，把地址发给对手</li>
+        </ol>
+        <div class="foot-note">链上版不需要后端；本地版不需要钱包。</div>
+      </div>
+      <div class="way">
+        <div class="who">B / 本地跑</div>
+        <h3>两条命令起服务</h3>
+        <pre>createdb nine_grid
+cargo run -p nine-grid-server</pre>
+        <div class="foot-note">打开 127.0.0.1:8080。migrations 自动执行，不用手工建表。</div>
+      </div>
+      <div class="way">
+        <div class="who">C / 看代码</div>
+        <h3>三条命令验完</h3>
+        <pre>just check        # fmt/clippy/test
+just chain-test   # 链上 10 项
+just lean-verify  # 21 条定理</pre>
+        <div class="foot-note">证明与实现不一致时，compare.sh 会逐行报出来。</div>
+      </div>
+    </div>
+    <p class="small" style="margin-top:auto">链上版不需要后端，本地版不需要钱包 —— 两种模式共用同一份判胜规则，所以本地看到的胜负与链上一致。</p>
+    <div class="foot"><span>使用</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 10 演示路线 -->
+  <section class="slide" data-notes="现场按这条走，三分钟内能跑完。链上那段务必提前给钱包领好 Devnet SOL，别在台上等水龙头。">
+    <div class="eyebrow"><b>09</b> 现场演示</div>
+    <h2>三分钟，四步</h2>
+    <div class="steps">
+      <div class="step"><div class="t">STEP 1</div><div><h3>开一局，发邀请</h3><p>首页点「开一局新棋」，拿到 6 位房间码与邀请链接。</p></div><div class="dur">30s</div></div>
+      <div class="step"><div class="t">STEP 2</div><div><h3>换窗口入座，三手判胜</h3><p>无痕窗口打开链接自动执 X，落三手，看胜线与棋谱。</p></div><div class="dur">40s</div></div>
+      <div class="step"><div class="t">STEP 3</div><div><h3>切一次主题</h3><p>右上角一键切「星穹会员」，同一份 DOM，只换变量。</p></div><div class="dur">10s</div></div>
+      <div class="step"><div class="t">STEP 4</div><div><h3>链上局与棋谱馆</h3><p>连 Phantom 建局，再进棋谱馆展开这局，看它从交易里重建出来。</p></div><div class="dur">60s</div></div>
+    </div>
+    <p class="small" style="margin-top:18px">兜底方案：链上 RPC 不稳时，直接放浏览器 E2E 的录屏，别在台上等网络。</p>
+    <div class="foot"><span>演示</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 11 下一步 -->
+  <section class="slide" data-notes="三件事按性价比排：真机走查半小时、托管半天、审计最贵。不要承诺主网时间，审计周期不可控。">
+    <div class="eyebrow"><b>10</b> 下一步</div>
+    <h2>还差三件事</h2>
+    <div class="body">
+    <div class="cols c3">
+      <div class="item">
+        <div class="n">01 / 半小时</div>
+        <h3>真机走查</h3>
+        <p>按文档在真 Phantom 上把签名弹窗点一遍。自动化模拟过，但真弹窗的文案与网络提示仍需人确认。</p>
+      </div>
+      <div class="item">
+        <div class="n">02 / 半天</div>
+        <h3>托管一版服务端</h3>
+        <p>接一个托管 Postgres，让人「打开就能下」。这是从「能演示」到「能给人用」的最低门槛。</p>
+      </div>
+      <div class="item">
+        <div class="n">03 / 不可控</div>
+        <h3>审计与主网</h3>
+        <p>主网前必须审计账户约束与结算逻辑；再补一点经济或积分设计，才有留下来的理由。</p>
+      </div>
+    </div>
+    <div class="quote">先把「能玩」做扎实，再谈「值得玩」。</div>
+    </div>
+    <div class="foot"><span>下一步</span><span class="pg"></span></div>
+  </section>
+
+  <!-- 12 结尾 -->
+  <section class="slide end" data-notes="收尾只留一句话和一个链接。二维码可以现场用手机打开链接生成，别放死图。">
+    <div class="eyebrow"><b>11</b> 结尾</div>
+    <h1>规则可以被证明，<br />代码可以被复跑。</h1>
+    <div class="links">
+      <a href="https://qiaopengjun5162.github.io/nine-grid/" target="_blank" rel="noopener">qiaopengjun5162.github.io/nine-grid</a>
+      <a href="https://github.com/qiaopengjun5162/nine-grid" target="_blank" rel="noopener">github.com/qiaopengjun5162/nine-grid</a>
+    </div>
+    <div class="kicker">九宫棋 · 一个把规则当作交付物的项目</div>
+    <div class="cover-board end-board" aria-hidden="true">
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"><i class="stone o"></i></div>
+      <div class="cb"></div>
+      <div class="cb"><i class="stone x"></i></div>
+      <div class="cb"></div>
+      <div class="cb"><i class="stone o"></i></div>
+    </div>
+    <div class="foot"><span>谢谢</span><span class="pg"></span></div>
+  </section>
+
+</div>
+
+<div id="ctrl">
+  <button id="prev" title="上一页（←）" aria-label="上一页">‹</button>
+  <button id="next" title="下一页（→ 或空格）" aria-label="下一页">›</button>
+</div>
+<div id="hint">← → 翻页 · F 全屏 · N 讲稿 · P 打印</div>
+<div id="notes"><b>讲稿</b><div id="notes-text"></div></div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var stage = document.getElementById("stage");
+  var bar = document.getElementById("bar");
+  var notes = document.getElementById("notes");
+  var notesText = document.getElementById("notes-text");
+  var idx = 0;
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function show(n, push) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle("active", k === idx); });
+    bar.style.width = ((idx + 1) / slides.length * 100) + "%";
+    var pg = slides[idx].querySelector(".pg");
+    if (pg) pg.textContent = pad(idx + 1) + " / " + pad(slides.length);
+    notesText.textContent = slides[idx].getAttribute("data-notes") || "（这一页没有讲稿）";
+    if (push !== false) history.replaceState(null, "", "#" + (idx + 1));
+  }
+
+  function fit() {
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    stage.style.transform = "scale(" + s + ")";
+  }
+
+  function toggleNotes() { notes.classList.toggle("on"); }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === "ArrowRight" || k === " " || k === "PageDown" || k === "ArrowDown") {
+      e.preventDefault(); show(idx + 1);
+    } else if (k === "ArrowLeft" || k === "PageUp" || k === "ArrowUp") {
+      e.preventDefault(); show(idx - 1);
+    } else if (k === "Home") { e.preventDefault(); show(0); }
+    else if (k === "End") { e.preventDefault(); show(slides.length - 1); }
+    else if (k === "n" || k === "N") { toggleNotes(); }
+    else if (k === "f" || k === "F") {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    } else if (k === "p" || k === "P") { window.print(); }
+  });
+
+  document.getElementById("next").addEventListener("click", function () { show(idx + 1); });
+  document.getElementById("prev").addEventListener("click", function () { show(idx - 1); });
+  window.addEventListener("resize", fit);
+
+  var start = parseInt((location.hash || "").replace("#", ""), 10);
+  show(isNaN(start) ? 0 : start - 1, false);
+  fit();
+
+  // 手改地址栏 #3 也能跳页（演示时常用来直接定位某一页）
+  window.addEventListener("hashchange", function () {
+    var n = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(n) && n - 1 !== idx) show(n - 1, false);
+  });
+})();
+</script>
+</body>
+</html>

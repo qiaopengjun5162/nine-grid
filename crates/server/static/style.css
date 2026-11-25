@@ -1419,3 +1419,256 @@ button:disabled { cursor: default; }
   [data-theme="cosmos"] .ambient::before,
   [data-theme="cosmos"] .ambient::after { animation: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   链上棋谱馆（chain-archive）
+   只读页面：统计、我的战绩、对局列表、从交易重建的棋谱回放。
+   与棋盘页共用变量，所以两套主题都不用重写一遍色板。
+   ═══════════════════════════════════════════════════════════════════ */
+.page.wide { width: min(780px, 100%); }
+
+section.panel + section.panel { margin-top: 16px; }
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.panel-head h2 {
+  margin: 0;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
+.panel-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 统计块 ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 10px;
+}
+.stat {
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+}
+.stat b {
+  display: block;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.stat span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.14em;
+}
+
+/* ── 地址输入 ── */
+.mine-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.mine-form input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.mine-form input:focus { outline: 2px solid var(--rust); outline-offset: 1px; }
+.mine-result { margin-top: 14px; }
+.arc-pda-form { margin-top: 16px; }
+
+/* ── 对局列表 ── */
+.arc-list { display: grid; gap: 12px; }
+.arc-row {
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 14px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0));
+}
+.arc-main { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+.arc-mini {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, 18px);
+  gap: 3px;
+}
+.arc-mini-cell {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background: rgba(120, 90, 60, 0.12);
+}
+/* 缩略盘面里的棋子按格子缩小，X 的笔画也要同步变细，否则 16px 里糊成一团 */
+.arc-mini-cell .mark.o,
+.arc-mini-cell .mark.x { width: 12px; height: 12px; }
+.arc-mini-cell .mark.x::before,
+.arc-mini-cell .mark.x::after {
+  width: 2px;
+  margin-left: -1px;
+  top: 6%;
+  height: 88%;
+}
+
+.arc-body { flex: 1 1 240px; min-width: 0; }
+.arc-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.arc-badge {
+  flex: none;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  letter-spacing: 0.08em;
+}
+.arc-badge.is-over {
+  color: #7a3b24;
+  border-color: rgba(156, 91, 60, 0.45);
+  background: rgba(156, 91, 60, 0.1);
+}
+.arc-badge.is-draw { color: var(--muted); }
+.arc-badge.is-live {
+  color: var(--jade);
+  border-color: rgba(47, 74, 62, 0.35);
+  background: rgba(47, 74, 62, 0.08);
+}
+.arc-badge.is-waiting { color: var(--muted); border-style: dashed; }
+
+.arc-pair {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+.arc-pair b { font-family: inherit; font-weight: 600; }
+.arc-vs { color: var(--muted); margin: 0 4px; font-size: 11px; }
+
+.arc-meta {
+  margin-top: 6px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.arc-meta a { color: var(--rust); text-decoration: none; border-bottom: 1px solid transparent; }
+.arc-meta a:hover { border-bottom-color: var(--rust); }
+
+/* ── 棋谱回放（从交易里重建） ── */
+.arc-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--hairline);
+}
+.arc-replay { display: flex; gap: 18px; flex-wrap: wrap; }
+.arc-replay-left { flex: none; }
+.arc-replay-board {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-auto-rows: 40px;
+  gap: 4px;
+}
+.arc-cell {
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: rgba(120, 90, 60, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(120, 90, 60, 0.12);
+}
+.arc-replay-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.arc-cursor {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.arc-replay-right { flex: 1 1 240px; min-width: 0; }
+.arc-move-text {
+  margin: 0 0 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.9;
+  word-break: break-word;
+}
+.arc-note { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.7; }
+.arc-check { margin: 8px 0 0; font-size: 12px; line-height: 1.6; }
+.arc-check.ok { color: var(--jade); }
+.arc-check.bad { color: var(--cinnabar); font-weight: 500; }
+.arc-loading { margin: 0; color: var(--muted); font-size: 12px; }
+.arc-loading.arc-bad { color: var(--cinnabar); }
+.empty-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.empty-note a { color: var(--rust); }
+
+/* ── 星穹会员版：玻璃面板 + 冷光 ── */
+[data-theme="cosmos"] .stat,
+[data-theme="cosmos"] .arc-row {
+  background: linear-gradient(165deg, rgba(72, 214, 232, 0.08), rgba(12, 20, 46, 0));
+  border-color: rgba(125, 175, 255, 0.22);
+}
+[data-theme="cosmos"] .stat b { text-shadow: 0 0 18px rgba(72, 214, 232, 0.35); }
+[data-theme="cosmos"] .arc-badge.is-over {
+  color: var(--gold);
+  border-color: rgba(255, 209, 102, 0.4);
+  background: rgba(255, 209, 102, 0.08);
+}
+[data-theme="cosmos"] .arc-badge.is-live {
+  color: var(--rust);
+  border-color: rgba(72, 214, 232, 0.45);
+  background: rgba(72, 214, 232, 0.1);
+}
+[data-theme="cosmos"] .arc-mini-cell,
+[data-theme="cosmos"] .arc-cell {
+  background: rgba(120, 175, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(125, 175, 255, 0.16);
+}
+[data-theme="cosmos"] .arc-check.ok { color: var(--rust); }
+[data-theme="cosmos"] .mine-form input {
+  background: rgba(9, 16, 38, 0.7);
+  border-color: rgba(125, 175, 255, 0.22);
+  color: var(--ink);
+}
+
+/* 缩略盘面 / 回放盘面的棋子：主题规则原本只覆盖 .cell 内的棋子，这里补上同样的青玉与赤金 */
+[data-theme="cosmos"] .arc-mini-cell .mark.o,
+[data-theme="cosmos"] .arc-cell .mark.o {
+  background:
+    radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.7), transparent 44%),
+    conic-gradient(
+      from 200deg,
+      #08303e, #48d6e8 10%, #0e4a5e 30%,
+      #06242f 58%, #35c4d8 84%, #08303e
+    );
+  box-shadow:
+    0 0 4px rgba(72, 214, 232, 0.55),
+    inset 0 0 4px rgba(72, 214, 232, 0.4);
+}
+[data-theme="cosmos"] .arc-mini-cell .mark.x::before,
+[data-theme="cosmos"] .arc-mini-cell .mark.x::after,
+[data-theme="cosmos"] .arc-cell .mark.x::before,
+[data-theme="cosmos"] .arc-cell .mark.x::after {
+  background: linear-gradient(90deg, #7a4a08, #ffd166 30%, #fff0c0 50%, #e8a838 76%, #7a4a08);
+  box-shadow: 0 0 8px rgba(255, 209, 102, 0.6);
+}

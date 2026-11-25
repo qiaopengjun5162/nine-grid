@@ -1,8 +1,8 @@
 name: Pages
 
 # 把链上版前端发布到 GitHub Pages。
-# 只发布 chain.html 这一页所需的静态文件 —— 主页/观战页依赖后端 API，
-# 在纯静态托管上跑不了，所以不发布它们（页面里的链接在 Pages 上会自动隐藏）。
+# 只发布纯静态、无需后端的页面（链上对局 / 链上棋谱馆）；
+# 主页与观战页依赖后端 API，在纯静态托管上跑不了，所以不发布（页面里的链接在 Pages 上会自动隐藏）。
 #
 # 发布后地址：https://<用户名>.github.io/nine-grid/
 
@@ -12,6 +12,8 @@ on:
     paths:
       - "crates/server/static/chain.html"
       - "crates/server/static/chain.js"
+      - "crates/server/static/chain-archive.html"
+      - "crates/server/static/chain-archive.js"
       - "crates/server/static/style.css"
       - "crates/server/static/theme.js"
       - "crates/server/static/chain/idl.json"
@@ -43,6 +45,8 @@ jobs:
           cp "$SRC/chain.html" _site/index.html
           cp "$SRC/chain.html" _site/chain.html
           cp "$SRC/chain.js"   _site/chain.js
+          cp "$SRC/chain-archive.html" _site/chain-archive.html
+          cp "$SRC/chain-archive.js"   _site/chain-archive.js
           cp "$SRC/style.css"  _site/style.css
           cp "$SRC/theme.js"   _site/theme.js
           cp "$SRC/chain/idl.json" _site/chain/idl.json

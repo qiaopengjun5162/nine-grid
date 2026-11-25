@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#efe4d0">
+  <title>链上棋谱馆 · 九宫棋</title>
+  <!-- 相对路径：本地根路径与 GitHub Pages 子路径（/nine-grid/）下都能加载 -->
+  <link rel="stylesheet" href="./style.css">
+  <!--
+    只读页面：不需要钱包、不需要签名，也不需要后端。
+    Anchor 只用来做账户解码与指令解码，因此仍然要加载 web3.js。
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@coral-xyz/anchor": "https://esm.sh/@coral-xyz/anchor@0.32.1?target=es2022",
+      "@solana/web3.js": "https://esm.sh/@solana/web3.js@1.98.4?target=es2022"
+    }
+  }
+  </script>
+  <!-- web3.js / Anchor 内部仍会用到 Node 的 Buffer，必须显式挂到全局（见 README 第十章的假绿事故） -->
+  <script type="module">
+    import { Buffer } from "https://esm.sh/buffer@6.0.3?target=es2022";
+    globalThis.Buffer = Buffer;
+  </script>
+  <script>
+    // 防闪烁：在样式和页面绘制前套用主题
+    try {
+      var t = localStorage.getItem("ninegrid-theme");
+      if (t === "cosmos" || t === "classic") {
+        document.documentElement.setAttribute("data-theme", t);
+      }
+    } catch (e) { /* 隐私模式下忽略 */ }
+  </script>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true">
+    <span class="glow glow-a"></span>
+    <span class="glow glow-b"></span>
+    <span class="grain"></span>
+  </div>
+
+  <main class="page wide">
+    <header class="masthead">
+      <div class="title-row">
+        <h1>链上棋谱馆</h1>
+        <span class="seal" aria-hidden="true">棋<br>谱</span>
+        <span class="member-badge" aria-hidden="true">MEMBER</span>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
+          <span class="theme-opt" data-theme-opt="classic" aria-pressed="true">古典</span>
+          <span class="theme-opt" data-theme-opt="cosmos" aria-pressed="false">✦ 星穹会员</span>
+        </button>
+      </div>
+      <p class="sub">不经过这台服务器。<br>对局账户与落子交易都在链上，这一页只用 RPC 把它们读回来。</p>
+      <nav class="top-nav">
+        <a href="./chain.html">链上对局</a>
+        <a class="local-only" href="./">本地版</a>
+        <a class="local-only" href="./watch.html">观战</a>
+        <a id="cluster-switch" href="?cluster=localnet">切到本地验证器</a>
+      </nav>
+      <p class="cluster-hint" id="cluster-hint">当前 Devnet · 只读查询，无需连接钱包</p>
+    </header>
+
+    <section id="archive-alert" class="panel alert-panel hidden" role="alert">
+      <p id="archive-alert-text"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>全局战绩</h2>
+        <span class="panel-note" id="archive-scope">读取中…</span>
+      </div>
+      <div class="stat-grid" id="archive-stats" aria-busy="true">
+        <div class="stat"><b id="stat-total">—</b><span>总对局</span></div>
+        <div class="stat"><b id="stat-finished">—</b><span>已终局</span></div>
+        <div class="stat"><b id="stat-live">—</b><span>对局中</span></div>
+        <div class="stat"><b id="stat-o">—</b><span>O 胜</span></div>
+        <div class="stat"><b id="stat-x">—</b><span>X 胜</span></div>
+        <div class="stat"><b id="stat-draw">—</b><span>和棋</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>我的战绩</h2>
+        <span class="panel-note">只读，不签名</span>
+      </div>
+      <form id="mine-form" class="mine-form">
+        <input id="mine-input" placeholder="粘贴钱包地址" autocomplete="off" spellcheck="false">
+        <button type="submit" class="ghost small">查询</button>
+        <button id="mine-wallet-btn" type="button" class="ghost small hidden">用我的钱包</button>
+      </form>
+      <div id="mine-result" class="mine-result hidden">
+        <div class="stat-grid">
+          <div class="stat"><b id="mine-wins">0</b><span>胜</span></div>
+          <div class="stat"><b id="mine-losses">0</b><span>负</span></div>
+          <div class="stat"><b id="mine-draws">0</b><span>和</span></div>
+          <div class="stat"><b id="mine-rate">—</b><span>胜率</span></div>
+        </div>
+        <p class="hint" id="mine-note"></p>
+      </div>
+      <p class="hint" id="mine-hint">地址从链上账户里比对，不发给任何服务器。链上版对局全部参与统计。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>对局列表</h2>
+        <span class="panel-note" id="archive-count">—</span>
+      </div>
+      <div id="archive-games" class="arc-list" aria-busy="true"></div>
+      <p id="archive-empty" class="empty-note hidden">这个网络上还没有九宫棋对局。回<a href="./chain.html">链上对局</a>开一局？</p>
+
+      <form id="pda-form" class="mine-form arc-pda-form">
+        <input id="pda-input" placeholder="或直接填对局 PDA 地址" autocomplete="off" spellcheck="false">
+        <button type="submit" class="ghost small">查这一局</button>
+      </form>
+    </section>
+
+    <section class="lore" aria-labelledby="archive-faq-title">
+      <div class="lore-head">
+        <h2 id="archive-faq-title">这一页凭什么可信</h2>
+        <p>没有后端、没有数据库、没有账号体系</p>
+      </div>
+      <div class="lore-body">
+        <p><b>账户即棋盘。</b>每局棋是一个 101 字节的 PDA 账户，里面存着终局盘面、双方公钥、
+        状态和手数。这一页用 <code>getProgramAccounts</code> 把它们全读出来，就地统计胜负。</p>
+        <p><b>棋谱来自交易，不来自数据库。</b>账户只存快照，存不下历史；但每一步落子都是一笔
+        <code>play(position)</code> 交易，永远留在链上。点「看棋谱」时，页面按签名历史逐笔取回交易、
+        解码出落子位置，再按规则重建整盘棋 —— 重建完会和账户里的终局盘面比对，不一致会直接标红。</p>
+        <p><b>所以要相信的只有两件事：</b>RPC 没有撒谎，以及你自己会看盘面。想彻底不信 RPC，
+        就把这笔交易丢进浏览器自己核一遍。</p>
+        <p><b>边界。</b>创建者可以 <code>close_game</code> 关掉账户退租金 —— 账户一没，这局就不再出现在列表里，
+        但落子交易还在链上。列表按账户枚举，所以本页看到的是「还没被关掉的局」。</p>
+      </div>
+    </section>
+  </main>
+  <script src="./theme.js"></script>
+  <script type="module" src="./chain-archive.js"></script>
+</body>
+</html>

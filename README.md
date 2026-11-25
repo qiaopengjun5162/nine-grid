@@ -113,7 +113,7 @@ nine-grid/
 │       ├── src/events.rs       # 房间事件总线（SSE 观战用）
 │       ├── src/error.rs        # 规则错误 → HTTP 状态码
 │       ├── src/config.rs
-│       └── static/             # index.html / watch.html / chain.html + 对应 js（无构建步骤）
+│       └── static/             # index / watch / chain / chain-archive + 对应 js（无构建步骤）
 │           └── chain/idl.json  # 链上 IDL，从 chain/target/idl 复制，随合约提交
 ├── migrations/
 │   ├── 0001_init.sql
@@ -121,7 +121,7 @@ nine-grid/
 ├── scripts/
 │   ├── smoke.sh                # 本地版 42 项端到端检查
 │   ├── chain-test.sh           # 链上端到端：验证器+部署+10 项测试+前端交易验证，自包含
-│   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 一局
+│   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 三局 + 棋谱馆还原棋谱
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
 │   │   └── src/{lib,state,errors}.rs
@@ -272,7 +272,7 @@ cargo test                       # 35 个单元测试（core 22 + bot 13）
 bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
-just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI 一局（需 Python playwright + pynacl）
+just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI（三局 + 棋谱馆还原棋谱）
 ```
 
 单元测试里有三个值得单说的：
@@ -338,6 +338,21 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI �
 会员版的棋盘仍是那套 CSS 3D（透视 / 落子坠落 / 抬起），只是把木纹换成发光能量块，
 光晕做在伪元素上而非 3D 祖先，避免 `filter` 把纵深压平。三页（本地 / 观战 / 链上）都能切换，
 链上页是会员风的天然主场；`prefers-reduced-motion` 下自动关掉星光闪烁。
+
+### 链上棋谱馆：把「任何人都能查」做成页面
+
+`chain-archive.html` 是纯只读页：不连钱包、不签名、不经过这台服务器，只用 RPC 把链上数据读回来。
+
+- **对局列表**：`getProgramAccounts` 枚举程序账户，就地算出总局数、终局数、O/X 胜与和棋；
+- **我的战绩**：地址与账户里的 `player_o` / `player_x` 比对，胜 / 负 / 和按终局统计（和棋计入胜率分母）；
+- **棋谱**：账户只存 101 字节快照，存不下历史；但每一手都是一笔 `play(position)` 交易。
+  点「看棋谱」时按 PDA 的签名历史逐笔取回交易，用 Anchor 的指令解码器解出落子位置，
+  再按 O 先手交替重建整盘棋 —— **重建完会和账户里的终局盘面比对，不一致直接标红**。
+
+这也顺便校正了一句容易说过头的话：链上**存的是终局盘面，不是棋谱**；棋谱在交易里，需要时才重建。
+创建者 `close_game` 之后账户消失，该局不再出现在列表里 —— 但交易仍在链上，
+所以这一页只承诺「列出还没被关掉的局」。浏览器 E2E 会建三局（O 胜 / X 胜 / 等待入座），
+关掉其中一局，再去棋谱馆核对统计、还原 5 手棋谱并比对盘面。
 
 ### 为什么没有上 Bevy
 
@@ -479,7 +494,14 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 页面默认 Devnet，可用 `?cluster=localnet` 切回本地验证器。
 devnet 上已用 Node 脚本实跑一局（建局→入座→落子→关局）全部通过。
 
-再往后才是可选项：做跨局积分。
+### 链上棋谱馆：`/chain-archive.html`
+
+打完一局就没下文，是链游最容易露怯的地方 —— 交易在链上，但没人给你看。棋谱馆补上这一半：
+不连钱包、不签名、不经过后端，直接枚举程序账户算全局战绩，按钱包地址比对个人胜负，
+再点开某局、顺着 PDA 的签名历史把每一手从交易里解出来重放，最后和账户里的终局盘面核对。
+细节与边界见 [第八章](#八前端让棋盘站起来) 的「链上棋谱馆」小节。
+
+再往后才是可选项：做跨局积分（现在的「我的战绩」只是链上账户的只读聚合，不是积分体系）。
 （三档难度、SSE 观战 + 回放时间轴、战绩榜、连 Phantom 的链上前端都已经落地，见下。）
 
 机器人已经落地了，但它是**最后一个被允许进这条流水线的东西**：

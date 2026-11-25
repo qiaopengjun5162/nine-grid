@@ -132,7 +132,7 @@ nine-grid/
 │   ├── Dump.lean               # 导出全部 19683 个棋盘的判胜结果
 │   └── compare.sh              # 与 Rust core 逐行交叉验证
 ├── .github/
-│   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e · chain
+│   ├── workflows/ci.yml        # fmt · clippy · test · msrv · audit · e2e · chain · lean
 │   ├── workflows/release.yml   # tag → 三平台 tar.gz + 自动发版说明
 │   ├── workflows/pages.yml     # 链上版前端 → GitHub Pages（Devnet）
 │   └── dependabot.yml
@@ -227,6 +227,7 @@ cargo run -p nine-grid-server
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
 | `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
 | `chain` | 链上单测 + 格式/lint，兼守 SBF 的 rustc 1.89 不被 MSRV 抬高 | `cargo test` + `fmt` + `clippy`（在 `chain/`，工具链 1.89） |
+| `lean` | 证明没过期：零 `sorry`，且与 Rust 判胜逐格一致 | `lake build`（扫 `sorry`/`sorryAx`）+ `compare.sh`（19683 棋盘 diff） |
 
 本地一条命令对齐 CI 的主 workspace 部分：`just check`（fmt + taplo + clippy + test + audit；需要 taplo、cargo-nextest、cargo-audit）；链上那套用 `just chain-unit`（本地是 SBF 版，CI 是 1.89 稳定版守卫）。
 
@@ -243,6 +244,10 @@ cargo run -p nine-grid-server
 4. **`audit` 的两条忽略写在 `.cargo/audit.toml` 里，每条都带理由。** 它们来自 sqlx 的 sqlite / mysql 后端
    （`cargo tree -i libsqlite3-sys` 在默认 target 下返回 `nothing to print`，根本没编译进产物），
    不是我们能升级的。用配置文件而不是 `--ignore` 参数，是为了让"为什么忽略"跟着代码一起走。
+5. **`lean` 是专门防"证明腐烂"的。** 形式化的价值在于它能被反复检查；core 改了判胜、Lean 侧没跟上，
+   那些定理就退化成历史文档。这条 job 除了编译（并把 `sorry` 警告升级成失败），
+   还会把两边的 19683 个棋盘判胜结果 diff 一遍 —— 定理保证"规格对"，交叉验证保证"两边说的是同一件事"。
+   elan 工具链和 `.lake` 都做了缓存，冷启动一两分钟，热缓存几十秒。
 
 发版是 tag 驱动的：
 
@@ -554,9 +559,10 @@ bash verification/lean/compare.sh
 - **不建模存储、网络、链上**。`apply` 只覆盖规则判定；`RuleError` 错误码、
   数据库事务、Anchor 账户校验都不在这一层。
 - **不验证 AI**。机器人策略不在形式化范围内。
-- 这套验证**不进 CI**：它只在规则变更时需要重跑，而 Lean 工具链体积大，
-  放进每次 push 不划算。改 `crates/core` 或 Lean 文件后本地跑一次即可
-  （`just lean-verify` / `just lean-compare`）。
+- 这套验证**曾经不进 CI**，理由是"工具链体积大、规则又不常改"。后来改了主意：
+  规则变更恰恰是最需要重跑证明的时刻，而"看起来没人改过"这种判断本身不可靠。
+  现在 CI 有一条 `lean` job（缓存 elan 与 `.lake`），把 `sorry` 和"与 Rust 不一致"都变成红灯；
+  本地仍可用 `just lean-verify` / `just lean-compare` 单跑。
 
 ---
 

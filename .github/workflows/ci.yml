@@ -206,3 +206,47 @@ jobs:
 
       - name: 链上 clippy
         run: cargo clippy --locked --all-targets -- -D warnings
+
+  # 证明也会过期：core 改了判胜、Lean 侧没跟上，README 里那句"零 sorry、与 Rust 逐格一致"
+  # 就成了空话。这条 job 钉两件事：lake build 里不许出现 sorry，以及 19683 个棋盘的判胜结果逐行相同。
+  lean:
+    name: lean（证明 + 与 Rust 逐格交叉验证）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # 不跟 latest 漂：版本由 verification/lean/lean-toolchain 固定，elan 只负责把它装上。
+      - name: 安装 elan
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: 缓存工具链与构建产物
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            verification/lean/.lake
+          key: lean-${{ runner.os }}-${{ hashFiles('verification/lean/lean-toolchain') }}-${{ hashFiles('verification/lean/**/*.lean') }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 编译全部定理（出现 sorry 直接失败）
+        working-directory: verification/lean
+        run: |
+          set -euo pipefail
+          lake build 2>&1 | tee /tmp/lean-build.log
+          # 证明里补了 sorry 时编译器只报警告，这里把它升级成失败
+          if grep -q "declaration uses 'sorry'" /tmp/lean-build.log; then
+            echo "::error::证明里出现了 sorry"
+            exit 1
+          fi
+          if grep -q "sorryAx" /tmp/lean-build.log; then
+            echo "::error::定理依赖了 sorryAx"
+            exit 1
+          fi
+
+      - name: 与 Rust core 逐格比对 19683 个棋盘
+        run: bash verification/lean/compare.sh

@@ -10,7 +10,7 @@ run:
 db:
     createdb nine_grid
 
-# 全量检查：与 .github/workflows/ci.yml 的 job 一一对应
+# 主 workspace 的全量检查（对应 ci.yml 里 fmt/clippy/test/audit 四条；e2e、chain、lean 另有目标）
 check: fmt-check toml-check clippy test audit
 
 fmt:

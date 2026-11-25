@@ -33,13 +33,26 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-      # taplo 用官方预编译产物，比 cargo install 快一个数量级
+      # taplo 用官方预编译产物，比 cargo install 快一个数量级。
+      #
+      # 但 GitHub 对匿名 release 下载会间歇性回 403（runner 出口 IP 共享），
+      # 这跟代码质量无关，却会把 fmt 判红。所以退避重试，最后退到 cargo install：
+      # 慢几分钟可以接受，因为「下载失败」不该等价于「格式不对」。
       - name: Install taplo
         run: |
-          curl -fsSL https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-linux-x86_64.gz \
-            | gunzip -c > "$RUNNER_TEMP/taplo"
-          chmod +x "$RUNNER_TEMP/taplo"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          set -uo pipefail
+          url="https://github.com/tamasfe/taplo/releases/download/0.9.3/taplo-linux-x86_64.gz"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL --connect-timeout 10 --max-time 60 "$url" | gunzip -c > "$RUNNER_TEMP/taplo"; then
+              chmod +x "$RUNNER_TEMP/taplo"
+              echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+              exit 0
+            fi
+            echo "第 $attempt 次下载失败，退避重试"
+            sleep $((attempt * 3))
+          done
+          echo "预编译包反复拿不到，退回 cargo install"
+          cargo install taplo-cli --locked --version 0.9.3
 
       - name: taplo fmt --check
         run: taplo fmt --check

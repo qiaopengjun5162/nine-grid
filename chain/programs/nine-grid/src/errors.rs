@@ -21,6 +21,8 @@ pub enum NineGridError {
     NotAPlayer,
     #[msg("对局数据自相矛盾")]
     InconsistentState,
+    #[msg("对局还没结束，不能关闭账户")]
+    GameInProgress,
 }
 
 /// 规则层错误 → 链上错误码。与服务端 error.rs 的映射一一对应，

@@ -111,6 +111,11 @@ pub mod nine_grid {
     ///
     /// 只有创建者能关自己付过租金的棋局。注意这一步会让该局棋彻底消失，
     /// 想留作「链上棋谱」的话就别调它。
+    ///
+    /// **对局中不许关**（`state == InProgress`）。账户就是这盘棋唯一的记录，
+    /// 允许单方关闭等于允许「快输了就掀桌」—— 对手的落子、胜负、棋谱会一起消失，
+    /// 而且没有任何反制手段。等待入座允许关（建错了能撤回），终局后允许关
+    /// （退租金），只锁住双方都在局中的那段时间。
     pub fn close_game(_ctx: Context<CloseGame>) -> Result<()> {
         Ok(())
     }
@@ -148,7 +153,14 @@ pub struct Play<'info> {
 
 #[derive(Accounts)]
 pub struct CloseGame<'info> {
-    #[account(mut, has_one = player_o, close = player_o)]
+    // 先对齐 `has_one` 再判状态：拿别人的局来试，会得到「不是你的局」而不是状态错误，
+    // 不泄露对局是否进行中。
+    #[account(
+        mut,
+        has_one = player_o,
+        close = player_o,
+        constraint = !game.state.is_in_progress() @ NineGridError::GameInProgress
+    )]
     pub game: Account<'info, Game>,
     #[account(mut)]
     pub player_o: Signer<'info>,

@@ -83,6 +83,7 @@ const ui = {
   txLink: document.getElementById("chain-tx-link"),
   joinGameBtn: document.getElementById("chain-join-game-btn"),
   closeBtn: document.getElementById("chain-close-btn"),
+  closeRule: document.getElementById("chain-close-rule"),
   leaveBtn: document.getElementById("chain-leave-btn"),
 };
 
@@ -468,14 +469,15 @@ function renderAccount(account) {
   renderBoard(board, account, myMark);
 
   const isOver = ["oWon", "xWon", "draw"].includes(stateKey);
-  ui.closeBtn.classList.toggle(
-    "hidden",
-    !(isOver && account.playerO.equals(state.wallet.publicKey)),
-  );
+  const iamO = account.playerO.equals(state.wallet.publicKey);
+  ui.closeBtn.classList.toggle("hidden", !(isOver && iamO));
+
+  // 对局中把按钮藏起来只是「不给点」，真正的约束在链上（CloseGame 的 constraint）。
+  // 这里多写一句，是为了避免有人以为按钮藏起来就等于规则生效。
+  ui.closeRule?.classList.toggle("hidden", !(stateKey === "inProgress" && iamO));
 
   // 等人入座时，非建局方（潜在 X）显示「入座」按钮去发 joinGame。
   // 建局方 O 看不到（链上也不允许自己入自己的局）。
-  const iamO = account.playerO.equals(state.wallet.publicKey);
   ui.joinGameBtn.classList.toggle(
     "hidden",
     !(stateKey === "waitingForOpponent" && !iamO),

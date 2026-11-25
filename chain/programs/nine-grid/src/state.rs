@@ -36,6 +36,12 @@ impl GameState {
         matches!(self, GameState::OWon | GameState::XWon | GameState::Draw)
     }
 
+    /// 双方已入座、棋还没下完。关局校验用这个，而不是「不是终局」——
+    /// 等待入座的空局也必须允许创建者撤回。
+    pub fn is_in_progress(&self) -> bool {
+        matches!(self, GameState::InProgress)
+    }
+
     /// 转成 core 的状态枚举，交给规则层判定
     #[must_use]
     pub const fn to_core(self) -> CoreState {

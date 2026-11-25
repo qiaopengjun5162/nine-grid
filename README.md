@@ -15,7 +15,7 @@
 > 三个棋子横、竖、斜连成一条直线即获胜。规则只有一句话，正好用来练「把状态机写对」这件事。
 
 当前状态：**本地版 + 链上版都已跑通** —— 建局 → 邀请 → 轮流落子 → 规则裁决 → 终局 → 棋谱回放，
-外加「一个人也能下」的机器人（简单 / 中等 / 困难三档）。本地版端到端检查、链上版 10 项真实交易测试全过。
+外加「一个人也能下」的机器人（简单 / 中等 / 困难三档）。本地版端到端检查、链上版 11 项真实交易测试全过。
 
 两个阶段共用**同一份规则代码**（`crates/core`）：本地版和 Solana 链上程序都调用它，规则只有一份。
 先做本地版再上链的理由，以及迁移时哪些代码没动，见文末。
@@ -120,13 +120,13 @@ nine-grid/
 │   └── 0002_bot_difficulty.sql
 ├── scripts/
 │   ├── smoke.sh                # 本地版 42 项端到端检查
-│   ├── chain-test.sh           # 链上端到端：验证器+部署+10 项测试+前端交易验证，自包含
+│   ├── chain-test.sh           # 链上端到端：验证器+部署+11 项测试+前端交易验证，自包含
 │   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 三局 + 棋谱馆还原棋谱
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
 │   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
 │   │   └── src/{lib,state,errors}.rs
 │   ├── Anchor.toml
-│   └── tests/nine-grid.ts      # 10 项真实链上交易测试
+│   └── tests/nine-grid.ts      # 11 项真实链上交易测试
 ├── verification/lean/          # Lean 4 形式化验证：判胜规格 + 状态机不变量，零 sorry
 │   ├── NineGrid/{Basic,Winner,Game}.lean
 │   ├── Dump.lean               # 导出全部 19683 个棋盘的判胜结果
@@ -276,7 +276,7 @@ just check                       # = fmt + taplo + clippy + test + audit（和 C
 cargo test                       # 35 个单元测试（core 22 + bot 13）
 bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
-just chain-test                  # 链上端到端：验证器+部署+10 项真实交易
+just chain-test                  # 链上端到端：验证器+部署+11 项真实交易
 just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI（三局 + 棋谱馆还原棋谱）
 ```
 
@@ -294,7 +294,7 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 冒烟脚本覆盖了正常对局 + 全部拒绝分支（不是你的回合、格子被占、版本过期、非玩家、终局后落子、第三人加入……）。
 
 链上还有一条关键的**一致性测试** `judge_matches_core_on_all_19683_boards`：把 3⁹ 种棋盘在链上账户编码和 core 之间反复往返，
-证明「u8 盘面 → core 判胜」这条桥不丢信息。链上端到端测试 10 项跑在真实 `solana-test-validator` 上，
+证明「u8 盘面 → core 判胜」这条桥不丢信息。链上端到端测试 11 项跑在真实 `solana-test-validator` 上，
 用部署后的 `.so` 发真实交易，覆盖完整对局 + 全部拒绝分支 + 终局冻结 + 关账户退租金。
 
 ---
@@ -448,7 +448,7 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 ## 十一、上链：哪些换了宿主，哪些一行没动
 
 阶段 B 已经做完并跑通。链上程序用 Anchor 0.32.1，程序 ID `AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6`，
-4 个指令（create_game / join_game / play / close_game），10 项真实交易测试全过，另有前端交易构造验证。
+4 个指令（create_game / join_game / play / close_game），11 项真实交易测试全过，另有前端交易构造验证。
 
 | 本地版 | 链上版 | 规则代码要改吗 |
 |---|---|---|
@@ -459,6 +459,11 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 | `version` 乐观锁 | 每笔交易自带 recent blockhash | 客户端换实现 |
 | `player_id`（localStorage UUID） | 钱包签名 + Pubkey | 新增一层鉴权 |
 | `Game::apply` 判胜/轮次/终局 | **同一个 `Game::apply`** | **完全没动** |
+
+**关局不是随时能关**：`close_game` 只允许「等待入座」或「已终局」两个时刻。对局中关不掉 ——
+账户就是这盘棋唯一的记录，允许创建者单方销毁等于允许「快输了就掀桌」，对手的棋谱和胜负会一起消失。
+这条约束写在校验里（`CloseGame` 的 `constraint`），不是靠前端把按钮藏起来。审计发现的问题与修复记录见
+[`docs/AUDIT.md`](docs/AUDIT.md)。
 
 **最关键的一点**：冻结版合约原本自己抄了一份 `judge()` 和 `WIN_LINES`，这次上链把它们全删了。
 链上账户通过 `to_rules()`（内部 `Board::from_codes` + `Game::restore`）还原成 core 的状态机，

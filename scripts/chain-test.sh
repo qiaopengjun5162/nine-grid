@@ -47,7 +47,7 @@ echo "==> 3/5 部署程序 $PROGRAM_ID"
   --program-id target/deploy/nine_grid-keypair.json \
   target/deploy/nine_grid.so 2>&1 | grep -E "Program Id|Signature" | head -2)
 
-echo "==> 4/5 跑 TS 集成测试（10 项）"
+echo "==> 4/5 跑 TS 集成测试（11 项）"
 cd "$CHAIN"
 ANCHOR_PROVIDER_URL="$RPC" \
 ANCHOR_WALLET="$WALLET" \

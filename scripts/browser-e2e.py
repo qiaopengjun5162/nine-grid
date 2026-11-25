@@ -136,7 +136,10 @@ def main():
             expect(px.locator("#chain-join-game-btn")).to_be_hidden(timeout=25000)
             # O 侧靠账户订阅自动刷新到对局中
             expect(po.locator("#chain-status")).to_contain_text("轮到你落子（O）", timeout=30000)
-            print("[X] 入座成功，O 侧订阅已刷新")
+            # 对局中不许关局：界面上连按钮都不给，并明确告知约束在链上（A-01）
+            expect(po.locator("#chain-close-btn")).to_be_hidden()
+            expect(po.locator("#chain-close-rule")).to_be_visible()
+            print("[X] 入座成功，O 侧订阅已刷新；对局中关局按钮不可见且给出规则说明")
 
         def play(moves):
             for who, pos in moves:
@@ -171,6 +174,7 @@ def main():
         assert px.locator("#chain-board .cell.win").count() == 3, "X 侧获胜线应有 3 格"
         expect(po.locator("#chain-close-btn")).to_be_visible()
         expect(px.locator("#chain-close-btn")).to_be_hidden()
+        expect(po.locator("#chain-close-rule")).to_be_hidden()  # 终局后那句限制说明该收起来
         print(f"[A] {po.locator('#chain-status').inner_text()}，关局按钮仅 O 方可见")
         back_to_lobby(po)  # 退出视图但保留链上账户
         print("[A] 退出对局视图，账户留在链上")

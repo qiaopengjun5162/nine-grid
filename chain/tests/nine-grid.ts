@@ -205,26 +205,61 @@ describe("nine-grid (on-chain)", () => {
     assert.equal(sb.moves, 0, "另一局不应受影响");
   });
 
-  it("只有建局者能关闭账户（退还租金）", async () => {
-    const game = await newStartedGame();
+  it("只有建局者能关闭账户，且对局中不许关", async () => {
+    const playing = await newStartedGame();
+
+    // 1) 非建局者：连碰都碰不到
     await expectError(
       program.methods
         .closeGame()
-        .accountsPartial({ game, playerO: X.publicKey })
+        .accountsPartial({ game: playing, playerO: X.publicKey })
         .signers([X])
         .rpc(),
       "ConstraintHasOne",
     );
+
+    // 2) 建局者也不行 —— 账户是这盘棋唯一的记录，对手已入座就不能单方销毁
+    await expectError(
+      program.methods
+        .closeGame()
+        .accountsPartial({ game: playing, playerO: O.publicKey })
+        .signers([O])
+        .rpc(),
+      "GameInProgress",
+    );
+    const stillThere = await program.account.game.fetch(playing);
+    assert.equal(stillThere.moves, 0, "关局被拒后账户应原封不动");
+  });
+
+  it("等待入座可以撤回，终局之后可以关局退租金", async () => {
+    // 建错了的局得能撤回，否则创建者要为每一局空局付租金
+    const empty = await createGame();
     await program.methods
       .closeGame()
-      .accountsPartial({ game, playerO: O.publicKey })
+      .accountsPartial({ game: empty, playerO: O.publicKey })
       .signers([O])
       .rpc();
+    let closed = false;
     try {
-      await program.account.game.fetch(game);
-      assert.fail("账户应已被关闭");
+      await program.account.game.fetch(empty);
     } catch {
-      // 关闭后读取失败是预期的
+      closed = true;
     }
+    assert.isTrue(closed, "账户应已被关闭");
+
+    // 下完之后可以关，租金退给创建者
+    const done = await newStartedGame();
+    for (const [who, pos] of [
+      [O, 0], [X, 3], [O, 1], [X, 4], [O, 2],
+    ] as const) {
+      await play(done, who, pos);
+    }
+    const fin = await program.account.game.fetch(done);
+    assert.isDefined(fin.state.oWon, "应为 O 方胜");
+    await program.methods
+      .closeGame()
+      .accountsPartial({ game: done, playerO: O.publicKey })
+      .signers([O])
+      .rpc();
   });
 });

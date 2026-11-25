@@ -57,6 +57,8 @@ struct SeatBotRequest {
     /// 机器人难度；缺省为 hard，兼容老的前端调用
     #[serde(default)]
     difficulty: Difficulty,
+    /// 这个座位的凭证；缺省时数据库会给出「缺少座位凭证」
+    seat_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +67,8 @@ struct PlayRequest {
     position: u8,
     /// 客户端上次看到的版本号；带上它就能避免"抢先后落子"
     version: Option<i64>,
+    /// 建局 / 入座时签发的那张凭证
+    seat_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +80,9 @@ struct ViewQuery {
 #[derive(Debug, Serialize)]
 struct GameView {
     you: Option<Mark>,
+    /// 只在建局 / 入座时出现一次；之后由前端自己保存，丢了就只能重开一局
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seat_token: Option<String>,
     #[serde(flatten)]
     game: GameSnapshot,
 }
@@ -96,9 +103,17 @@ async fn create_game(
     State(app): State<AppState>,
     Json(req): Json<CreateGameRequest>,
 ) -> Result<(StatusCode, Json<GameView>), AppError> {
-    let game = db::create_game(&app.pool, req.player_id, req.handle.as_deref()).await?;
+    let (game, seat_token) =
+        db::create_game(&app.pool, req.player_id, req.handle.as_deref()).await?;
     let you = game.mark_of(req.player_id);
-    Ok((StatusCode::CREATED, Json(GameView { you, game })))
+    Ok((
+        StatusCode::CREATED,
+        Json(GameView {
+            you,
+            seat_token: Some(seat_token),
+            game,
+        }),
+    ))
 }
 
 async fn join_game(
@@ -107,10 +122,15 @@ async fn join_game(
     Json(req): Json<JoinGameRequest>,
 ) -> Result<Json<GameView>, AppError> {
     let code = normalize_code(&code)?;
-    let game = db::join_game(&app.pool, &code, req.player_id, req.handle.as_deref()).await?;
+    let (game, seat_token) =
+        db::join_game(&app.pool, &code, req.player_id, req.handle.as_deref()).await?;
     publish_move(&app, &game);
     let you = game.mark_of(req.player_id);
-    Ok(Json(GameView { you, game }))
+    Ok(Json(GameView {
+        you,
+        seat_token: Some(seat_token),
+        game,
+    }))
 }
 
 /// 建局者邀请机器人坐进对面的座位。
@@ -123,10 +143,21 @@ async fn seat_bot(
     Json(req): Json<SeatBotRequest>,
 ) -> Result<Json<GameView>, AppError> {
     let code = normalize_code(&code)?;
-    let game = db::seat_bot(&app.pool, &code, req.player_id, req.difficulty).await?;
+    let game = db::seat_bot(
+        &app.pool,
+        &code,
+        req.player_id,
+        req.difficulty,
+        req.seat_token.as_deref(),
+    )
+    .await?;
     publish_move(&app, &game);
     let you = game.mark_of(req.player_id);
-    Ok(Json(GameView { you, game }))
+    Ok(Json(GameView {
+        you,
+        seat_token: None,
+        game,
+    }))
 }
 
 async fn get_game(
@@ -137,7 +168,11 @@ async fn get_game(
     let code = normalize_code(&code)?;
     let game = db::snapshot(&app.pool, &code).await?;
     let you = query.player_id.and_then(|id| game.mark_of(id));
-    Ok(Json(GameView { you, game }))
+    Ok(Json(GameView {
+        you,
+        seat_token: None,
+        game,
+    }))
 }
 
 async fn play_move(
@@ -146,10 +181,22 @@ async fn play_move(
     Json(req): Json<PlayRequest>,
 ) -> Result<Json<GameView>, AppError> {
     let code = normalize_code(&code)?;
-    let game = db::play(&app.pool, &code, req.player_id, req.position, req.version).await?;
+    let game = db::play(
+        &app.pool,
+        &code,
+        req.player_id,
+        req.position,
+        req.version,
+        req.seat_token.as_deref(),
+    )
+    .await?;
     publish_move(&app, &game);
     let you = game.mark_of(req.player_id);
-    Ok(Json(GameView { you, game }))
+    Ok(Json(GameView {
+        you,
+        seat_token: None,
+        game,
+    }))
 }
 
 /// 只回棋谱。这个接口是"棋谱即真相"的直接体现：

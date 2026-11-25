@@ -60,6 +60,28 @@ function ensurePlayerId() {
   return id;
 }
 
+// ── 座位凭证 ──
+// 建局 / 入座时服务端签发一次，之后每次落子都要带上。
+// 它只保护「这一个座位」，不是身份体系：换台设备打开同一局，能看不能下。
+const seatKey = (code) => `ninegrid-seat-${code}`;
+
+function rememberSeat(code, token) {
+  if (!code || !token) return;
+  try {
+    localStorage.setItem(seatKey(code), token);
+  } catch {
+    // 隐私模式下写不进去就算了，这一局还能下完，只是刷新后要重开
+  }
+}
+
+function seatToken(code) {
+  try {
+    return localStorage.getItem(seatKey(code)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function fallbackId() {
   return "p-" + Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
@@ -412,7 +434,12 @@ async function onCellClick(index) {
   try {
     const next = await api(`/api/games/${encodeURIComponent(view.code)}/moves`, {
       method: "POST",
-      body: { player_id: state.playerId, position: index, version: view.version },
+      body: {
+        player_id: state.playerId,
+        position: index,
+        version: view.version,
+        seat_token: seatToken(view.code),
+      },
     });
     render(next);
   } catch (err) {
@@ -472,6 +499,7 @@ async function createGame() {
     });
     state.room = view.code;
     state.renderedPlies = 0;
+    rememberSeat(view.code, view.seat_token);
     history.replaceState(null, "", `?room=${view.code}`);
     render(view);
     startPolling();
@@ -493,6 +521,7 @@ async function createBotGame() {
     });
     state.room = created.code;
     state.renderedPlies = 0;
+    rememberSeat(created.code, created.seat_token);
     history.replaceState(null, "", `?room=${created.code}`);
     render(created);
     await seatBot();
@@ -513,7 +542,11 @@ async function seatBot() {
     const difficulty = ui.botDifficulty?.value ?? "hard";
     const view = await api(`/api/games/${encodeURIComponent(state.room)}/bot`, {
       method: "POST",
-      body: { player_id: state.playerId, difficulty },
+      body: {
+        player_id: state.playerId,
+        difficulty,
+        seat_token: seatToken(state.room),
+      },
     });
     render(view);
     const label = { easy: "简单", medium: "中等", hard: "困难" }[difficulty] ?? difficulty;
@@ -536,6 +569,7 @@ async function openRoom(code) {
         method: "POST",
         body: { player_id: state.playerId },
       });
+      rememberSeat(view.code, view.seat_token);
       toast("已入座，你执 X");
     }
     history.replaceState(null, "", `?room=${view.code}`);

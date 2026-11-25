@@ -119,7 +119,7 @@ nine-grid/
 │   ├── 0001_init.sql
 │   └── 0002_bot_difficulty.sql
 ├── scripts/
-│   ├── smoke.sh                # 本地版 42 项端到端检查
+│   ├── smoke.sh                # 本地版 44 项端到端检查
 │   ├── chain-test.sh           # 链上端到端：验证器+部署+11 项测试+前端交易验证，自包含
 │   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 三局 + 棋谱馆还原棋谱
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
@@ -225,7 +225,7 @@ cargo run -p nine-grid-server
 | `test` | 35 个单测（含 3⁹ 穷举）在干净环境也能过 | `cargo nextest run --all-features` |
 | `msrv` | `rust-version = "1.94"` 不是一句空话 | `cargo +1.94.0 check --locked` |
 | `audit` | 依赖里没有已知漏洞 | `cargo audit` |
-| `e2e` | **真 Postgres + 真二进制 + 42 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
+| `e2e` | **真 Postgres + 真二进制 + 44 项冒烟** | `cargo build` → 启动 → `scripts/smoke.sh` |
 | `chain` | 链上单测 + 格式/lint，兼守 SBF 的 rustc 1.89 不被 MSRV 抬高 | `cargo test` + `fmt` + `clippy`（在 `chain/`，工具链 1.89） |
 | `lean` | 证明没过期：零 `sorry`，且与 Rust 判胜逐格一致 | `lake build`（扫 `sorry`/`sorryAx`）+ `compare.sh`（19683 棋盘 diff） |
 
@@ -234,7 +234,7 @@ cargo run -p nine-grid-server
 四个设计决定值得单独说：
 
 1. **`e2e` 才是真正能挡住事故的那一步。** 单测证明规则对，但证明不了「服务能启动、migrations 能跑、落库是真的」——
-   所以 CI 里起一个 `postgres:17` service，跑完整个 42 项冒烟。这一步的存在感比前面五个加起来还高。
+   所以 CI 里起一个 `postgres:17` service，跑完整个 44 项冒烟。这一步的存在感比前面五个加起来还高。
 2. **`msrv` 是被 `uuid` 打脸之后才补的。** 原本写的 1.88，但 `uuid 1.29` 已经要求 1.89。
    不跑这个 job，README 上那句「Rust 1.88+」就是假话 —— 后来改成 1.89 并由 CI 看着。
    再后来 `sqlx 0.9` 把门槛抬到 1.94，这个 job 又跟着升了一次。历史可以变，但「承诺必须被验证」这条没变。
@@ -274,7 +274,7 @@ DATABASE_URL=postgres://... ./nine-grid      # 自动读同目录的 static/
 ```bash
 just check                       # = fmt + taplo + clippy + test + audit（和 CI 同款）
 cargo test                       # 35 个单元测试（core 22 + bot 13）
-bash scripts/smoke.sh            # 本地版 42 项端到端检查（服务需先跑起来）
+bash scripts/smoke.sh            # 本地版 44 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
 just chain-test                  # 链上端到端：验证器+部署+11 项真实交易
 just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI（三局 + 棋谱馆还原棋谱）
@@ -457,7 +457,7 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 | `if !ok { return Err(...) }` | `require!(ok, Error)` | 否，错误由 `RuleError → NineGridError` 一一映射 |
 | `FOR UPDATE` 行锁 | Solana 账户锁（天然串行） | 否 |
 | `version` 乐观锁 | 每笔交易自带 recent blockhash | 客户端换实现 |
-| `player_id`（localStorage UUID） | 钱包签名 + Pubkey | 新增一层鉴权 |
+| `player_id`（localStorage UUID）+ 座位凭证 | 钱包签名 + Pubkey | 新增一层鉴权 |
 | `Game::apply` 判胜/轮次/终局 | **同一个 `Game::apply`** | **完全没动** |
 
 **关局不是随时能关**：`close_game` 只允许「等待入座」或「已终局」两个时刻。对局中关不掉 ——
@@ -468,6 +468,10 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 **最关键的一点**：冻结版合约原本自己抄了一份 `judge()` 和 `WIN_LINES`，这次上链把它们全删了。
 链上账户通过 `to_rules()`（内部 `Board::from_codes` + `Game::restore`）还原成 core 的状态机，
 调 `apply()` 裁决后再 `apply_rules()` 写回。规则从此只有一份 —— 改 core 一处，本地和链上同时生效。
+
+本地版的「座位凭证」只解决一个问题：知道你的 `player_id` 不等于能替你落子。
+建局 / 入座时服务端签发 32 字节随机凭证（只存 SHA-256），落子必须带；但它不回答「你是谁」，
+所以自己开两个浏览器对刷战绩仍然拦不住 —— 那是身份问题，得钱包签名，见 `docs/AUDIT.md` A-02。
 
 core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_codes/to_codes`、`GameState::to_code/from_code`、
 `Game::restore`。它们只做「字节 ↔ 规则状态」的翻译和一致性校验（比如状态说 O 赢，棋盘就必须真有三连），

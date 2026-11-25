@@ -31,34 +31,42 @@ check "GET / 返回页面" "200" "$(curl -s -o /dev/null -w '%{http_code}' "$BAS
 echo "== 建局 =="
 VIEW=$(post /api/games "{\"player_id\":\"$A\"}")
 CODE=$(echo "$VIEW" | jq -r .code)
+TA=$(echo "$VIEW" | jq -r .seat_token)
 check "房间码是 6 位" "6" "${#CODE}"
 check "创建者执 O" "O" "$(echo "$VIEW" | jq -r .you)"
 check "初始状态 waiting" "waiting" "$(echo "$VIEW" | jq -r .state)"
-check "还没对手就落子被拒" "not_started" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0}" | err_code)"
+check "还没对手就落子被拒" "not_started" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0,\"seat_token\":\"$TA\"}" | err_code)"
 
 echo "== 加入 =="
 VIEW=$(post "/api/games/$CODE/join" "{\"player_id\":\"$B\"}")
+TB=$(echo "$VIEW" | jq -r .seat_token)
 check "加入后进入进行中" "in_progress" "$(echo "$VIEW" | jq -r .state)"
 check "加入者执 X" "X" "$(echo "$VIEW" | jq -r .you)"
 check "第三个人加入被拒" "game_full" "$(post "/api/games/$CODE/join" "{\"player_id\":\"$C\"}" | err_code)"
 check "建局者加入自己的房间被拒" "game_full" "$(post "/api/games/$CODE/join" "{\"player_id\":\"$A\"}" | err_code)"
-check "X 抢先落子被拒" "not_your_turn" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":8}" | err_code)"
+check "X 抢先落子被拒" "not_your_turn" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":8,\"seat_token\":\"$TB\"}" | err_code)"
+
+# 凭证这一层要单独验：知道 player_id 不等于坐在这把椅子上
+check "不带座位凭证落子被拒" "missing_seat_token" \
+  "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0}" | err_code)"
+check "座位凭证不对被拒" "bad_seat_token" \
+  "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0,\"seat_token\":\"deadbeef\"}" | err_code)"
 
 echo "== 落子（O0 X3 O1 X4）=="
-post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0,\"version\":1}" >/dev/null
-post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":3,\"version\":2}" >/dev/null
-post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":1,\"version\":3}" >/dev/null
-post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":4,\"version\":4}" >/dev/null
-check "重复占格被拒" "cell_occupied" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":4,\"version\":5}" | err_code)"
-check "过期版本号被拒" "stale_version" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":2,\"version\":2}" | err_code)"
+post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":0,\"version\":1,\"seat_token\":\"$TA\"}" >/dev/null
+post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":3,\"version\":2,\"seat_token\":\"$TB\"}" >/dev/null
+post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":1,\"version\":3,\"seat_token\":\"$TA\"}" >/dev/null
+post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":4,\"version\":4,\"seat_token\":\"$TB\"}" >/dev/null
+check "重复占格被拒" "cell_occupied" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":4,\"version\":5,\"seat_token\":\"$TA\"}" | err_code)"
+check "过期版本号被拒" "stale_version" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":2,\"version\":2,\"seat_token\":\"$TA\"}" | err_code)"
 check "路人落子被拒" "not_a_player" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$C\",\"position\":2}" | err_code)"
 
 echo "== 终局 =="
-VIEW=$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":2,\"version\":5}")
+VIEW=$(post "/api/games/$CODE/moves" "{\"player_id\":\"$A\",\"position\":2,\"version\":5,\"seat_token\":\"$TA\"}")
 check "O 三连获胜" "o_won" "$(echo "$VIEW" | jq -r .state)"
 check "胜者标记正确" "O" "$(echo "$VIEW" | jq -r .winner)"
 check "落满 5 手" "5" "$(echo "$VIEW" | jq -r .plies)"
-check "终局后不能继续落子" "game_over" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":5}" | err_code)"
+check "终局后不能继续落子" "game_over" "$(post "/api/games/$CODE/moves" "{\"player_id\":\"$B\",\"position\":5,\"seat_token\":\"$TB\"}" | err_code)"
 
 echo "== 读取 =="
 check "旁观者 you 为空" "null" "$(curl -s "$BASE/api/games/$CODE?player_id=$C" | jq -r .you)"
@@ -70,16 +78,17 @@ echo "== 机器人 =="
 # 机器人是"另一个玩家"：它占 X 座位，落子同样进棋谱
 SOLO=$(post /api/games "{\"player_id\":\"$A\"}")
 SOLO_CODE=$(echo "$SOLO" | jq -r .code)
+TSOLO=$(echo "$SOLO" | jq -r .seat_token)
 check "非建局者不能邀请机器人" "not_host" \
   "$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$B\"}" | err_code)"
 
-BV=$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\"}")
+BV=$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\",\"seat_token\":\"$TSOLO\"}")
 check "机器人入座后对局开始" "in_progress" "$(echo "$BV" | jq -r .state)"
 check "X 座位被标记为机器人" "true" "$(echo "$BV" | jq -r .players.x.is_bot)"
 check "机器人有可读名字" "机器人" "$(echo "$BV" | jq -r .players.x.handle)"
-check "重复邀请机器人被拒" "game_full" "$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\"}" | err_code)"
+check "重复邀请机器人被拒" "game_full" "$(post "/api/games/$SOLO_CODE/bot" "{\"player_id\":\"$A\",\"seat_token\":\"$TSOLO\"}" | err_code)"
 
-MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":0}")
+MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":0,\"seat_token\":\"$TSOLO\"}")
 check "人类落一子后机器人立刻应招" "2" "$(echo "$MV" | jq -r .plies)"
 check "机器人占了中心" "4" "$(echo "$MV" | jq -r '.moves[1].position')"
 check "应招后轮次回到人类" "O" "$(echo "$MV" | jq -r .turn)"
@@ -89,7 +98,7 @@ GUARD=0
 while [ "$(echo "$MV" | jq -r .state)" = "in_progress" ] && [ "$GUARD" -lt 9 ]; do
   EMPTY=$(echo "$MV" | jq -r '[range(9) as $i | select(.board[$i] == null) | $i][0]')
   VER=$(echo "$MV" | jq -r .version)
-  MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":$EMPTY,\"version\":$VER}")
+  MV=$(post "/api/games/$SOLO_CODE/moves" "{\"player_id\":\"$A\",\"position\":$EMPTY,\"version\":$VER,\"seat_token\":\"$TSOLO\"}")
   GUARD=$((GUARD + 1))
 done
 STATE=$(echo "$MV" | jq -r .state)
@@ -102,30 +111,38 @@ check "人机对局也留下完整棋谱" "$(echo "$MV" | jq -r .plies)" \
 echo "== 机器人难度 =="
 for DIFF in hard medium easy; do
   D=$(uuidgen | tr 'A-Z' 'a-z')
-  DC=$(post /api/games "{\"player_id\":\"$D\"}" | jq -r .code)
-  DV=$(post "/api/games/$DC/bot" "{\"player_id\":\"$D\",\"difficulty\":\"$DIFF\"}")
+  DR=$(post /api/games "{\"player_id\":\"$D\"}")
+  DC=$(echo "$DR" | jq -r .code)
+  TD=$(echo "$DR" | jq -r .seat_token)
+  DV=$(post "/api/games/$DC/bot" "{\"player_id\":\"$D\",\"difficulty\":\"$DIFF\",\"seat_token\":\"$TD\"}")
   check "$DIFF 档入座后回显难度" "$DIFF" "$(echo "$DV" | jq -r .bot_difficulty)"
 done
 
-DEFAULT=$(post /api/games "{\"player_id\":\"$A\"}" | jq -r .code)
+DEFAULT_VIEW=$(post /api/games "{\"player_id\":\"$A\"}")
+DEFAULT=$(echo "$DEFAULT_VIEW" | jq -r .code)
+TDEFAULT=$(echo "$DEFAULT_VIEW" | jq -r .seat_token)
 check "缺省难度兼容为 hard" "hard" \
-  "$(post "/api/games/$DEFAULT/bot" "{\"player_id\":\"$A\"}" | jq -r .bot_difficulty)"
+  "$(post "/api/games/$DEFAULT/bot" "{\"player_id\":\"$A\",\"seat_token\":\"$TDEFAULT\"}" | jq -r .bot_difficulty)"
 
-BADCODE=$(post /api/games "{\"player_id\":\"$A\"}" | jq -r .code)
+BADVIEW=$(post /api/games "{\"player_id\":\"$A\"}")
+BADCODE=$(echo "$BADVIEW" | jq -r .code)
+TBAD=$(echo "$BADVIEW" | jq -r .seat_token)
 BAD_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/games/$BADCODE/bot" \
-  -H 'content-type: application/json' -d "{\"player_id\":\"$A\",\"difficulty\":\"impossible\"}")
+  -H 'content-type: application/json' -d "{\"player_id\":\"$A\",\"difficulty\":\"impossible\",\"seat_token\":\"$TBAD\"}")
 check "非法难度被拒" "422" "$BAD_STATUS"
 
 # 观战 SSE：订阅后落子，应收到 move 事件（事件里只带通知，端上回拉快照）
 echo "== 观战与战绩 =="
 WATCH_A=$(uuidgen | tr 'A-Z' 'a-z')
 WATCH_B=$(uuidgen | tr 'A-Z' 'a-z')
-WC=$(post /api/games "{\"player_id\":\"$WATCH_A\"}" | jq -r .code)
+WVIEW=$(post /api/games "{\"player_id\":\"$WATCH_A\"}")
+WC=$(echo "$WVIEW" | jq -r .code)
+TWA=$(echo "$WVIEW" | jq -r .seat_token)
 post "/api/games/$WC/join" "{\"player_id\":\"$WATCH_B\"}" > /dev/null
 curl -sN -m 4 "$BASE/api/games/$WC/events" > /tmp/smoke-sse.txt 2>/dev/null &
 SSE_PID=$!
 sleep 1
-post "/api/games/$WC/moves" "{\"player_id\":\"$WATCH_A\",\"position\":4}" > /dev/null
+post "/api/games/$WC/moves" "{\"player_id\":\"$WATCH_A\",\"position\":4,\"seat_token\":\"$TWA\"}" > /dev/null
 wait $SSE_PID 2>/dev/null
 check "SSE 观战收到落子通知" "1" "$(grep -c '^event: move' /tmp/smoke-sse.txt)"
 
@@ -135,16 +152,20 @@ check "战绩榜接口可用" "array" "$([ "$(echo "$LB_BODY" | jq -r '.entries 
 LB_A=$(uuidgen | tr 'A-Z' 'a-z')
 LB_B=$(uuidgen | tr 'A-Z' 'a-z')
 LB_SOLO=$(uuidgen | tr 'A-Z' 'a-z')
-LC=$(post /api/games "{\"player_id\":\"$LB_A\"}" | jq -r .code)
-post "/api/games/$LC/join" "{\"player_id\":\"$LB_B\"}" > /dev/null
+LVIEW=$(post /api/games "{\"player_id\":\"$LB_A\"}")
+LC=$(echo "$LVIEW" | jq -r .code)
+TLA=$(echo "$LVIEW" | jq -r .seat_token)
+TLB=$(post "/api/games/$LC/join" "{\"player_id\":\"$LB_B\"}" | jq -r .seat_token)
 for P in 0 3 1 4 2; do
-  if [ "$P" = 0 ] || [ "$P" = 1 ] || [ "$P" = 2 ]; then WHO=$LB_A; else WHO=$LB_B; fi
-  post "/api/games/$LC/moves" "{\"player_id\":\"$WHO\",\"position\":$P}" > /dev/null
+  if [ "$P" = 0 ] || [ "$P" = 1 ] || [ "$P" = 2 ]; then WHO=$LB_A; TK=$TLA; else WHO=$LB_B; TK=$TLB; fi
+  post "/api/games/$LC/moves" "{\"player_id\":\"$WHO\",\"position\":$P,\"seat_token\":\"$TK\"}" > /dev/null
 done
-SC=$(post /api/games "{\"player_id\":\"$LB_SOLO\"}" | jq -r .code)
-post "/api/games/$SC/bot" "{\"player_id\":\"$LB_SOLO\",\"difficulty\":\"easy\"}" > /dev/null
+SVIEW=$(post /api/games "{\"player_id\":\"$LB_SOLO\"}")
+SC=$(echo "$SVIEW" | jq -r .code)
+TSC=$(echo "$SVIEW" | jq -r .seat_token)
+post "/api/games/$SC/bot" "{\"player_id\":\"$LB_SOLO\",\"difficulty\":\"easy\",\"seat_token\":\"$TSC\"}" > /dev/null
 for P in 0 1 2 3 4 5; do
-  RES=$(post "/api/games/$SC/moves" "{\"player_id\":\"$LB_SOLO\",\"position\":$P}")
+  RES=$(post "/api/games/$SC/moves" "{\"player_id\":\"$LB_SOLO\",\"position\":$P,\"seat_token\":\"$TSC\"}")
   [ "$(echo "$RES" | jq -r .state)" != in_progress ] && break
 done
 LB_FRESH=$(curl -s "$BASE/api/leaderboard")

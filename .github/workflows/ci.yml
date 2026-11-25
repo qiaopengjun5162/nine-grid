@@ -113,7 +113,7 @@ jobs:
       - name: cargo audit
         run: cargo audit
 
-  # 真正的端到端检查：起一个 Postgres，跑 migrations + 二进制 + 42 项冒烟。
+  # 真正的端到端检查：起一个 Postgres，跑 migrations + 二进制 + 44 项冒烟。
   # 这一步才验证"服务能启动、能落库、能下完一局"，单元测试替代不了。
   e2e:
     name: e2e（Postgres + smoke）

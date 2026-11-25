@@ -2,6 +2,7 @@ use nine_grid_bot::Difficulty;
 use nine_grid_core::{FIRST_MARK, Game, GameState, Mark};
 use rand::RngExt;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use sqlx::{
     PgConnection, PgPool, Postgres, Row,
     postgres::{PgPoolOptions, PgRow},
@@ -21,6 +22,58 @@ const ROOM_LEN: usize = 6;
 /// 将来换成真人对手或链上地址，这一列代码不用动。
 pub const BOT_ID: Uuid = Uuid::from_u128(0xb070);
 const BOT_HANDLE: &str = "机器人";
+
+/// 生成座位凭证：返回「给客户端的明文」与「入库的哈希」。
+///
+/// 明文只在签发这一次出现，服务端不保留 —— 即使库被读走，也拿不到能用的凭证。
+/// 32 字节随机量，够这局棋用到结束。
+fn issue_seat_token() -> (String, String) {
+    let mut rng = rand::rng();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.random::<u8>()).collect();
+    let raw: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let hash = hash_seat_token(&raw);
+    (raw, hash)
+}
+
+fn hash_seat_token(raw: &str) -> String {
+    Sha256::digest(raw.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 校验「你是不是这个座位」。
+///
+/// 顺序是刻意的：先看这一局有没有这个座位的凭证，再看调用方带没带对。
+/// 两种情况给不同的错误码，前端才能给出「这局不是从这台设备开的」这种人话。
+async fn verify_seat_token(
+    tx: &mut PgConnection,
+    game_id: Uuid,
+    mark: Mark,
+    presented: Option<&str>,
+) -> Result<(), AppError> {
+    let stored: Option<String> =
+        sqlx::query_scalar("select token_hash from seat_tokens where game_id = $1 and mark = $2")
+            .bind(game_id)
+            .bind(mark.code())
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    let expected = stored.ok_or_else(|| {
+        AppError::forbidden(
+            "missing_seat_token",
+            "这一局开在本迁移之前，没有座位凭证，无法继续落子",
+        )
+    })?;
+    let presented = presented.ok_or_else(|| {
+        AppError::forbidden(
+            "missing_seat_token",
+            "缺少座位凭证 —— 这局不是从这台设备开的，换回建局的那个浏览器",
+        )
+    })?;
+
+    if hash_seat_token(presented) != expected {
+        return Err(AppError::forbidden("bad_seat_token", "座位凭证不对"));
+    }
+    Ok(())
+}
 
 /// 连接数据库并把 migrations 全部应用一遍
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
@@ -94,7 +147,7 @@ pub async fn create_game(
     pool: &PgPool,
     player_id: Uuid,
     handle: Option<&str>,
-) -> Result<GameSnapshot, AppError> {
+) -> Result<(GameSnapshot, String), AppError> {
     upsert_player(pool, player_id, handle).await?;
 
     // 房间码冲突概率极低，但仍然要处理；重试 8 次仍冲突就报错
@@ -125,8 +178,16 @@ pub async fn create_game(
             .execute(&mut *tx)
             .await?;
 
+        let (seat_token, token_hash) = issue_seat_token();
+        sqlx::query("insert into seat_tokens (game_id, mark, token_hash) values ($1, $2, $3)")
+            .bind(id)
+            .bind(FIRST_MARK.code())
+            .bind(&token_hash)
+            .execute(&mut *tx)
+            .await?;
+
         tx.commit().await?;
-        return snapshot(pool, &code).await;
+        return Ok((snapshot(pool, &code).await?, seat_token));
     }
 
     Err(AppError::Internal("房间号分配失败，请重试".to_owned()))
@@ -138,7 +199,7 @@ pub async fn join_game(
     code: &str,
     player_id: Uuid,
     handle: Option<&str>,
-) -> Result<GameSnapshot, AppError> {
+) -> Result<(GameSnapshot, String), AppError> {
     upsert_player(pool, player_id, handle).await?;
 
     let mut tx = pool.begin().await?;
@@ -175,8 +236,16 @@ pub async fn join_game(
     .execute(&mut *tx)
     .await?;
 
+    let (seat_token, token_hash) = issue_seat_token();
+    sqlx::query("insert into seat_tokens (game_id, mark, token_hash) values ($1, $2, $3)")
+        .bind(game.id)
+        .bind(Mark::X.code())
+        .bind(&token_hash)
+        .execute(&mut *tx)
+        .await?;
+
     tx.commit().await?;
-    snapshot(pool, code).await
+    Ok((snapshot(pool, code).await?, seat_token))
 }
 
 /// 让机器人坐进 X 座位。只有建局者（O 方）能邀请。
@@ -189,6 +258,7 @@ pub async fn seat_bot(
     code: &str,
     caller: Uuid,
     difficulty: Difficulty,
+    seat_token: Option<&str>,
 ) -> Result<GameSnapshot, AppError> {
     let mut tx = pool.begin().await?;
     let game = lock_game(&mut tx, code).await?;
@@ -198,6 +268,7 @@ pub async fn seat_bot(
     if seat_mark(&mut tx, game.id, caller).await? != Some(FIRST_MARK) {
         return Err(AppError::forbidden("not_host", "只有建局者能邀请机器人"));
     }
+    verify_seat_token(&mut tx, game.id, FIRST_MARK, seat_token).await?;
     if game.state != GameState::Waiting {
         return Err(AppError::conflict("game_full", "这一局已经开始了"));
     }
@@ -235,6 +306,7 @@ pub async fn play(
     player_id: Uuid,
     position: u8,
     expected_version: Option<i64>,
+    seat_token: Option<&str>,
 ) -> Result<GameSnapshot, AppError> {
     let mut tx = pool.begin().await?;
     let game_row = lock_game(&mut tx, code).await?;
@@ -256,6 +328,9 @@ pub async fn play(
     let mark = seat_mark(&mut tx, game_row.id, player_id)
         .await?
         .ok_or_else(|| AppError::forbidden("not_a_player", "你不是这局棋的玩家"))?;
+
+    // 知道 player_id 不等于坐在这把椅子上 —— 还要拿得出这把椅子的凭证。
+    verify_seat_token(&mut tx, game_row.id, mark, seat_token).await?;
 
     record_move(&mut tx, game_row.id, &mut game, mark, position, player_id).await?;
 

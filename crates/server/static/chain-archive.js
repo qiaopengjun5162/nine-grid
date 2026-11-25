@@ -81,6 +81,8 @@ const state = {
   connection: null,
   program: null,
   games: [],
+  /** RPC 不允许枚举程序账户时为 true：列表/统计不可用，但单局查询仍然可行 */
+  listFailed: false,
   /** pda -> { plies: number[], error: string | null }，避免重复拉交易 */
   history: new Map(),
 };
@@ -212,6 +214,7 @@ async function loadGames() {
   } catch (err) {
     // 公共 RPC 可能禁用 getProgramAccounts。这时列表不可用，但单局查询仍然可行。
     state.games = [];
+    state.listFailed = true;
     ui.scope.textContent = "枚举不可用";
     showAlert(
       `这个 RPC 不允许枚举程序账户（${err.message}）。仍可在下方直接填 PDA 查单局 —— 只读查询不受影响。`,
@@ -244,8 +247,9 @@ function renderStats() {
   ui.xWins.textContent = t.x;
   ui.draws.textContent = t.draw;
   ui.stats.setAttribute("aria-busy", "false");
-  ui.scope.textContent =
-    t.total === 0
+  ui.scope.textContent = state.listFailed
+    ? `${CLUSTER.label} · 枚举不可用，可用 PDA 查单局`
+    : t.total === 0
       ? `${CLUSTER.label} · 暂无对局`
       : `${CLUSTER.label} · 已终局 ${t.finished} / 共 ${t.total} 局${t.waiting ? ` · ${t.waiting} 局等待入座` : ""}`;
 }
@@ -549,6 +553,13 @@ function onMineQuery(event) {
     return;
   }
   clearAlert();
+
+  if (state.listFailed) {
+    ui.mineResult.classList.add("hidden");
+    ui.mineHint.textContent =
+      "当前 RPC 不支持枚举程序账户，没法按地址汇总战绩。可用下方的 PDA 查询单看某一局。";
+    return;
+  }
 
   const mine = state.games.filter((g) => g.playerO === pk.toBase58() || g.playerX === pk.toBase58());
   let wins = 0;

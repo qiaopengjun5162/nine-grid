@@ -50,6 +50,7 @@ jobs:
           cp "$SRC/chain-archive.js"   _site/chain-archive.js
           cp "$SRC/style.css"  _site/style.css
           cp "$SRC/theme.js"   _site/theme.js
+          cp "$SRC/showcase.html" _site/showcase.html
           cp "$SRC/chain/idl.json" _site/chain/idl.json
           echo "发布文件："
           find _site -type f | sort

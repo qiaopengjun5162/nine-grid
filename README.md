@@ -564,6 +564,9 @@ bash verification/lean/compare.sh
   现在 CI 有一条 `lean` job（缓存 elan 与 `.lake`），把 `sorry` 和"与 Rust 不一致"都变成红灯；
   本地仍可用 `just lean-verify` / `just lean-compare` 单跑。
 
+对外解释这件事有现成话术：见 `verification/lean/README.md` 的「怎么讲给别人听」——
+一句话 / 三十秒 / 技术版三档说法、造桥的类比，以及三个最容易说错的表述。
+
 ---
 
 ## License

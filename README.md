@@ -370,6 +370,9 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 
 线上地址：`/showcase.html`（沿 Pages 一起发布，和链上页同一套静态目录）。
 
+演示前看 `docs/DEMO.md`：60 秒自检、5 分钟讲稿与演示交替、翻车预案，以及三句「别说错」的边界话术。
+网络全断时的兜底是 `docs/media/demo-local.webm`（真人一局赢机器人的录屏）。
+
 ### 为什么没有上 Bevy
 
 [Bevy](https://docs.rs/bevy/latest/bevy/) 是真 3D 游戏引擎，我建了探针工程实际试过：

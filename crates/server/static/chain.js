@@ -470,7 +470,10 @@ function renderAccount(account) {
 
   const isOver = ["oWon", "xWon", "draw"].includes(stateKey);
   const iamO = account.playerO.equals(state.wallet.publicKey);
-  ui.closeBtn.classList.toggle("hidden", !(isOver && iamO));
+  // 终局后关局是「收尾」，等人入座时关局是「撤回」——链上都允许（只禁对局中）。
+  const canClose = (isOver || stateKey === "waitingForOpponent") && iamO;
+  ui.closeBtn.classList.toggle("hidden", !canClose);
+  ui.closeBtn.textContent = isOver ? "关局退租金" : "撤回这局";
 
   // 对局中把按钮藏起来只是「不给点」，真正的约束在链上（CloseGame 的 constraint）。
   // 这里多写一句，是为了避免有人以为按钮藏起来就等于规则生效。

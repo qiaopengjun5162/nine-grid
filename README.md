@@ -212,6 +212,30 @@ cargo run -p nine-grid-server
 
 `migrations` 在启动时自动执行，不需要手动迁移。
 
+### 不想装 Rust 和 Postgres？用 Docker
+
+```bash
+docker compose up -d --build      # 首次构建约 3–5 分钟，之后秒起
+open http://127.0.0.1:8080        # 同一个地址，同一份前端
+docker compose down               # 停掉；数据留在 pgdata 卷里
+docker compose down -v            # 连库一起删
+```
+
+`compose.yaml` 起两个服务：`db`（Postgres 17，带 `pg_isready` 健康检查）和 `app`
+（多阶段构建，运行层只有二进制 + 静态文件，非 root、带 `/healthz` 健康检查）。
+服务端启动时自己去跑内嵌的 `migrations`，所以库里是空的也能直接起来。
+
+镜像本身不带数据库，也可以单独用：
+
+```bash
+docker build -t nine-grid .
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL=postgres://user:pass@host:5432/nine_grid nine-grid
+```
+
+> 这是「自托管」的最低配，不是生产加固版：没有 TLS、没有反向代理、没有速率限制（见 `docs/AUDIT.md` A-05）。
+> 对外暴露前先补这三样。
+
 ---
 
 ## 六、CI/CD

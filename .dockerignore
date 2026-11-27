@@ -1,0 +1,24 @@
+# 构建上下文里不需要的东西——进镜像只会变慢、变大、多一个泄漏面。
+target/
+.git/
+.github/
+chain/
+verification/
+docs/
+scripts/
+
+# 演示稿与录屏只用于讲解，不进服务镜像（showcase.html 在 static 里，随服务一起发）
+docs/media/
+
+# 本地环境与编辑器
+.env
+.env.*
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# 说明文档
+*.md
+!crates/server/static/*.md
+LICENSE

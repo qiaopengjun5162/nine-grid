@@ -39,7 +39,7 @@
 | A-01 | P0 | `chain/.../lib.rs` `CloseGame` | 对局进行中，创建者可以关掉账户 | 对手的棋谱、胜负、记录一起消失，且无任何救济手段。等于「快输了就掀桌」 | **已修** |
 | A-02 | P0 | `static/app.js`、`server/src/api.rs` | 身份是客户端自报的 UUID（localStorage 生成，请求体直接采信） | 知道别人 UUID 就能替他落子；两个浏览器可对刷战绩 | **部分修复**：加座位凭证，冒充已挡住；自刷与榜单口径仍未解决（见第四节） |
 | A-03 | P1 | 链上程序（仅 4 个指令） | 没有超时、认输、和棋协议 | 对手掉线 → 这局永远卡在 `InProgress`。A-01 修复后**连创建者也不能关**了，租金锁死 | 未修，见下方权衡 |
-| A-04 | P1 | 仓库根目录 | 没有 Dockerfile / compose，`config.rs` 只读 `DATABASE_URL` 与 `BIND_ADDR` | 非开发者无法部署；「自托管」目前只是开发者选项 | 未修 |
+| A-04 | P1 | 仓库根目录 | 没有 Dockerfile / compose，`config.rs` 只读 `DATABASE_URL` 与 `BIND_ADDR` | 非开发者无法部署；「自托管」目前只是开发者选项 | **已修**：`Dockerfile` + `compose.yaml`，容器内冒烟 44/44 |
 | A-05 | P1 | `server/src/api.rs` | 无速率限制 | 任何人可无限建局把库刷大；SSE 连接也无上限 | 未修 |
 | A-06 | P1 | `static/chain.js` | 硬判断 `window.solana?.isPhantom` | 手机浏览器、Backpack、Solflare 全部进不来 | 未修 |
 | A-07 | P1 | `static/chain.html` importmap | Anchor / web3.js 从 `esm.sh` 加载 | CDN 不可达或被墙时整页白屏（此前已因 `Buffer` 缺 polyfill 踩过一次） | 已知，未消除 |
@@ -121,7 +121,37 @@ pub game: Account<'info, Game>,
 并且只让绑定钱包的局进榜。代价是「不用装钱包也能玩」这个卖点会打折扣，所以没在这轮做 ——
 它是个产品决策，不是技术决策。
 
-## 五、复核方式（任何人都能自己跑）
+## 五、已修复：A-04（无法部署）
+
+**修之前的实际情况**：只有 `cargo run` 一条路。要跑起来得先有 Rust 1.94、Postgres 14+、
+一个建好的库，还得知道 `DATABASE_URL` 默认指向哪。「自托管」写在 README 里，但只有开发者能兑现。
+
+**修法**：`Dockerfile` + `compose.yaml` 两件东西，不做别的。
+
+- 多阶段构建：`rust:1.94-slim-bookworm` 编译，`debian:bookworm-slim` 运行；运行层只有
+  二进制、静态文件和 `ca-certificates`/`curl`（后者给健康检查用），镜像 116 MB。
+- 运行层非 root（uid 10001）、只读挂载静态目录、`HEALTHCHECK` 打 `/healthz`。
+- `migrations` 是编译期内嵌的（`sqlx::migrate!`），所以空库起来会自己建表；
+  compose 里 `db` 用 `pg_isready` 做健康检查，`app` 等它 healthy 再起。
+- compose 里数据库口令是明文常量，只适合本地/内网；对外部署要换 secrets。
+
+**实测（2026-11-27，OrbStack，Apple Silicon）**：
+
+| 检查 | 结果 |
+|---|---|
+| `docker compose up -d --build` | 冷构建 15m50s（含拉基础镜像与 release LTO），两个容器 healthy |
+| `docker compose exec app id` | `uid=10001(ninegrid)`，不是 root |
+| 空库启动 | 日志出现「数据库已就绪，migrations 已应用」，无需手工建表 |
+| `BASE_URL=… bash scripts/smoke.sh` | **44/44 通过** |
+| `docker compose restart app` 后查同一局 | 棋局还在（数据在 `pgdata` 卷） |
+
+**这没解决什么**（别说成「能对外运营了」）：
+
+- 没有 TLS、没有反向代理、没有速率限制 —— A-05 原样未修，公网暴露等于开门让人刷库。
+- 口令是 compose 里的明文常量，不是 secret 管理。
+- 单实例、无备份策略；`pgdata` 卷坏了就是全丢。
+
+## 六、复核方式（任何人都能自己跑）
 
 ```bash
 cargo test -p nine-grid-core -p nine-grid-bot   # 35 项

@@ -64,3 +64,12 @@ lean-verify:
 # Lean ↔ Rust 交叉验证：比对全部 19683 个棋盘的判胜结果
 lean-compare:
     bash verification/lean/compare.sh
+
+# 容器化自托管：构建镜像 + 起 Postgres，然后打开 http://127.0.0.1:8080
+up:
+    docker compose up -d --build
+
+# 停掉容器（数据留在 pgdata 卷里；要连数据一起删用 down -v）
+down:
+    docker compose down
+

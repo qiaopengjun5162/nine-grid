@@ -1,0 +1,44 @@
+# 一套能直接跑的部署：Postgres + 服务端。
+#
+#   docker compose up -d --build     # 首次构建约 3–5 分钟
+#   open http://127.0.0.1:8080       # 打开就能下
+#   docker compose down              # 停掉（数据留存在 pgdata 卷里）
+#   docker compose down -v           # 连数据一起删
+#
+# 这是「自托管」的最低配，不是生产加固版：没有 TLS、没有反向代理、
+# 没有速率限制（见 docs/AUDIT.md A-05），对外暴露前先补这三样。
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: nine_grid
+      POSTGRES_USER: nine
+      # 只为本地/内网自托管；对外部署请改成随机口令并走 secrets。
+      POSTGRES_PASSWORD: nine_grid_local
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nine -d nine_grid"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://nine:nine_grid_local@db:5432/nine_grid
+      BIND_ADDR: 0.0.0.0:8080
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

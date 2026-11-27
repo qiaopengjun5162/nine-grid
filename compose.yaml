@@ -33,6 +33,8 @@ services:
       DATABASE_URL: postgres://nine:nine_grid_local@db:5432/nine_grid
       BIND_ADDR: 0.0.0.0:8080
       RUST_LOG: info
+      # 每个 IP 每分钟的写请求额度；0 关闭。见 docs/AUDIT.md A-05。
+      RATE_LIMIT_PER_MIN: 300
     ports:
       - "8080:8080"
     depends_on:

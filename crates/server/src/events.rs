@@ -17,24 +17,29 @@ use serde::Serialize;
 use sqlx::PgPool;
 use tokio::sync::broadcast;
 
+use crate::ratelimit::RateLimiter;
+
 /// 每个频道的缓冲条数。一局最多 9 手，32 足够宽松；
 /// 观战端偶尔卡一下积压几条也能追上，超出才报 Lagged（handler 里跳过）。
 const CHANNEL_CAPACITY: usize = 32;
 
-/// axum 的共享状态：数据库连接池 + 事件总线。
+/// axum 的共享状态：数据库连接池 + 事件总线 + 写接口限流器。
 /// 用 `Arc` 包住总线，是因为 axum 会 clone 整个 state 给每个请求。
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub pool: PgPool,
     bus: Arc<EventBus>,
+    /// `None` 表示限流关闭（`RATE_LIMIT_PER_MIN=0`），给压测和本地调试留口子
+    pub limiter: Option<Arc<RateLimiter>>,
 }
 
 impl AppState {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool, limiter: Option<Arc<RateLimiter>>) -> Self {
         Self {
             pool,
             bus: Arc::new(EventBus::default()),
+            limiter,
         }
     }
 

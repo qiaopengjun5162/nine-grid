@@ -3,8 +3,9 @@ mod config;
 mod db;
 mod error;
 mod events;
+mod ratelimit;
 
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 
@@ -32,11 +33,26 @@ async fn main() -> anyhow::Result<()> {
 
     let static_dir = resolve_static_dir();
 
-    let app = api::router(AppState::new(pool), static_dir);
+    let limiter = ratelimit::RateLimiter::per_minute(config.rate_limit_per_min).map(Arc::new);
+    match &limiter {
+        Some(_) => tracing::info!(
+            per_min = config.rate_limit_per_min,
+            "写接口限流已启用（按来源 IP）"
+        ),
+        None => tracing::warn!("写接口限流已关闭（RATE_LIMIT_PER_MIN=0）"),
+    }
+
+    let app = api::router(AppState::new(pool, limiter), static_dir);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!("打开 http://{} 就能开始下棋", config.bind_addr);
 
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
+    // 要 ConnectInfo 才能拿到来源 IP —— 限流按 IP 分桶靠它，别改回 `serve(listener, app)`。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

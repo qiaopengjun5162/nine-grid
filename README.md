@@ -187,6 +187,11 @@ waiting ──join──▶ in_progress ──三连──▶ o_won / x_won
 
 `not_started` · `not_your_turn` · `cell_occupied` · `game_over` · `game_full` · `stale_version` · `not_a_player` · `not_host` · `out_of_range` · `game_not_found`
 
+写接口另有一层**按 IP 的限流**：默认每 IP 每分钟 300 次（`RATE_LIMIT_PER_MIN`，0 关闭），
+超了返回 `429` 和 `too_many_requests`，响应头带 `Retry-After`（秒）。
+只挡 `POST`——读接口和观战 SSE 不限，否则正常人看棋会被误伤。
+限流认的是 TCP 对端地址，**不读 `X-Forwarded-For`**（那个头能伪造）；放在反向代理后面时请让代理自己限流。
+
 房间码是 6 位 Crockford 风格字母表（去掉 `I/L/O/0/1`），手输不会看错。
 
 ---

@@ -1,10 +1,14 @@
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::sse::{Event, Sse},
+    extract::{ConnectInfo, Path, Query, Request, State},
+    http::{StatusCode, header},
+    middleware::{self, Next},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, Sse},
+    },
     routing::{get, post},
 };
 use futures_util::Stream;
@@ -23,19 +27,58 @@ use crate::{
 };
 
 /// 路由表：玩法接口 + 观战 SSE + 战绩榜 + 健康检查，其余全部交给静态文件
+///
+/// 写接口（建局 / 入座 / 请机器人 / 落子）单独挂一层限流；读接口与 SSE 不限，
+/// 因为它们幂等、而且观战是长连接 —— 给它们限流只会让正常人看不了棋。
 pub fn router(state: AppState, static_dir: PathBuf) -> Router {
-    Router::new()
-        .route("/healthz", get(healthz))
+    let writes = Router::new()
         .route("/api/games", post(create_game))
-        .route("/api/games/{code}", get(get_game))
         .route("/api/games/{code}/join", post(join_game))
         .route("/api/games/{code}/bot", post(seat_bot))
         .route("/api/games/{code}/moves", post(play_move))
+        .route_layer(middleware::from_fn_with_state(state.clone(), limit_writes));
+
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/api/games/{code}", get(get_game))
         .route("/api/games/{code}/replay", get(replay))
         .route("/api/games/{code}/events", get(game_events))
         .route("/api/leaderboard", get(leaderboard))
+        .merge(writes)
         .fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true))
         .with_state(state)
+}
+
+/// 写接口限流：每个来源 IP 一个令牌桶，挡不住就回 429 + `Retry-After`。
+///
+/// 刻意只认 TCP 对端地址，不读 `X-Forwarded-For` —— 那个头客户端能随便伪造，
+/// 信了等于没限流。真放在反向代理后面时，请让代理自己限流（nginx `limit_req`），
+/// 否则所有用户会共用代理这一个桶。
+async fn limit_writes(
+    State(app): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let Some(limiter) = app.limiter.as_ref() else {
+        return next.run(req).await;
+    };
+
+    if let Err(wait) = limiter.check(addr.ip()) {
+        let retry_after = wait.as_secs().max(1).to_string();
+        tracing::debug!(ip = %addr.ip(), retry_after, "写接口被限流");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, retry_after)],
+            Json(json!({
+                "error": "too_many_requests",
+                "message": "请求太频繁了，歇一会儿再下",
+            })),
+        )
+            .into_response();
+    }
+
+    next.run(req).await
 }
 
 #[derive(Debug, Deserialize)]

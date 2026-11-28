@@ -8,15 +8,18 @@
   <!-- 相对路径：本地根路径与 GitHub Pages 子路径（/nine-grid/）下都能加载 -->
   <link rel="stylesheet" href="./style.css">
   <!--
-    链上版依赖 Anchor + web3.js。为了保持"无构建步骤"，从 esm.sh 按 ESM 加载，
-    配合下面的 importmap 固定版本。首次打开需联网；依赖版本与 chain/package.json 对齐。
+    链上版依赖 Anchor + web3.js。依赖**随仓库托管**（vendor/ 三个 .mjs，来自
+    esm.sh 的 ?bundle 产物，已内联全部子依赖，无外部 import），所以断网、CDN 被墙
+    都不影响打开本页 —— 只影响钱包本身与 RPC。
+    版本与 chain/package.json 对齐：@coral-xyz/anchor 0.32.1、@solana/web3.js 1.98.4。
+    升级依赖时重新取一次 ?bundle 产物替换即可。
     IDL 本地托管在 /chain/idl.json，随合约一起提交。
   -->
   <script type="importmap">
   {
     "imports": {
-      "@coral-xyz/anchor": "https://esm.sh/@coral-xyz/anchor@0.32.1?target=es2022",
-      "@solana/web3.js": "https://esm.sh/@solana/web3.js@1.98.4?target=es2022"
+      "@coral-xyz/anchor": "./vendor/anchor.bundle.mjs",
+      "@solana/web3.js": "./vendor/web3.bundle.mjs"
     }
   }
   </script>
@@ -26,7 +29,7 @@
     普通 module script 按文档顺序执行，因此它一定在 chain.js 之前跑完。
   -->
   <script type="module">
-    import { Buffer } from "https://esm.sh/buffer@6.0.3?target=es2022";
+    import { Buffer } from "./vendor/buffer.bundle.mjs";
     globalThis.Buffer = Buffer;
   </script>
   <script>
@@ -74,7 +77,7 @@
 
     <section id="chain-lobby" class="panel">
       <div class="wallet-row">
-        <button id="connect-btn" class="primary" type="button">连接 Phantom 钱包</button>
+        <button id="connect-btn" class="primary" type="button">连接钱包</button>
         <span id="wallet-addr" class="wallet-addr">未连接</span>
       </div>
       <div id="network-note" class="network-note hidden"></div>
@@ -124,9 +127,12 @@
         <span id="chain-tx-state" class="tx-state">等待签名</span>
         <a id="chain-tx-link" class="tx-link hidden" target="_blank" rel="noopener">浏览器查看 ↗</a>
         <button id="chain-join-game-btn" class="primary small hidden" type="button">入座（执 X）</button>
+        <button id="chain-resign-btn" class="ghost small hidden" type="button">认输</button>
+        <button id="chain-timeout-btn" class="ghost small hidden" type="button">判对方超时</button>
         <button id="chain-close-btn" class="ghost small hidden" type="button">关局退租金</button>
         <button id="chain-leave-btn" class="ghost small" type="button">退出</button>
       </div>
+      <p class="hint hidden" id="chain-timeout-hint"></p>
     </section>
 
     <section class="lore" aria-labelledby="chain-faq-title">
@@ -142,7 +148,7 @@
         <p><b>账户即棋盘。</b>一局棋是一个 PDA 账户（101 字节），棋盘快照直接存在链上；
         每步落子发 <code>MovePlayed</code> 事件，棋谱由事件拼出来。账户锁天然串行，不需要本地版的行锁。</p>
         <p><b>要跑起来。</b>先起本地验证器并部署程序（见 <code>scripts/chain-test.sh</code>），
-        再把 Phantom 切到对应的 localnet / devnet。程序地址写在 IDL 里，前端不改一行。</p>
+        再把钱包切到对应的 localnet / devnet。程序地址写在 IDL 里，前端不改一行。</p>
       </div>
     </section>
   </main>

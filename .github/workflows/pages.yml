@@ -18,6 +18,7 @@ on:
       - "crates/server/static/theme.js"
       - "crates/server/static/showcase.html"
       - "crates/server/static/chain/idl.json"
+      - "crates/server/static/vendor/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -41,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           SRC=crates/server/static
-          mkdir -p _site/chain
+          mkdir -p _site/chain _site/vendor
           # chain.html 同时作为首页，这样 /nine-grid/ 直接就是链上版
           cp "$SRC/chain.html" _site/index.html
           cp "$SRC/chain.html" _site/chain.html
@@ -52,6 +53,7 @@ jobs:
           cp "$SRC/theme.js"   _site/theme.js
           cp "$SRC/showcase.html" _site/showcase.html
           cp "$SRC/chain/idl.json" _site/chain/idl.json
+          cp "$SRC/vendor/"*.mjs _site/vendor/
           echo "发布文件："
           find _site -type f | sort
 

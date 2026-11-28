@@ -1,4 +1,4 @@
-// 链上版前端：Phantom 钱包 + Anchor 程序。
+// 链上版前端：浏览器钱包（Phantom / Solflare / Backpack / OKX）+ Anchor 程序。
 //
 // 这里同样不判规则 —— 棋盘来自链上账户的 board 数组，能不能点由 state/turn 决定，
 // 落子结果由链上程序裁决。前端只负责发交易、签名、渲染账户状态。
@@ -23,7 +23,7 @@ const CLUSTERS = {
   devnet: {
     label: "Devnet",
     rpc: "https://api.devnet.solana.com",
-    // Phantom 里的网络名，用来核对钱包是否切对
+    // 钱包里的网络名，用来核对是否切对
     phantomNetwork: "Devnet",
     explorer: "https://explorer.solana.com",
     explorerParam: "cluster=devnet",
@@ -57,6 +57,10 @@ const STATE_LABEL = {
   draw: "平局",
 };
 
+// 与链上 `state::TIMEOUT_SECS` 一致。这里只用来算倒计时和按钮是否可点 ——
+// 真正的判罚由链上时钟和执行结果决定，前端算错了也骗不过程序。
+const TIMEOUT_SECS = 300;
+
 const ui = {
   alert: document.getElementById("chain-alert"),
   alertText: document.getElementById("chain-alert-text"),
@@ -82,6 +86,9 @@ const ui = {
   txState: document.getElementById("chain-tx-state"),
   txLink: document.getElementById("chain-tx-link"),
   joinGameBtn: document.getElementById("chain-join-game-btn"),
+  resignBtn: document.getElementById("chain-resign-btn"),
+  timeoutBtn: document.getElementById("chain-timeout-btn"),
+  timeoutHint: document.getElementById("chain-timeout-hint"),
   closeBtn: document.getElementById("chain-close-btn"),
   closeRule: document.getElementById("chain-close-rule"),
   leaveBtn: document.getElementById("chain-leave-btn"),
@@ -92,16 +99,19 @@ const state = {
   provider: null,
   program: null,
   wallet: null,
+  walletProvider: null,
   pda: null,
   accountSub: null,
+  account: null,
   busy: false,
   renderedMoves: -1,
 };
 
-// ── Phantom → Anchor Wallet 适配 ──
-// Phantom 注入 window.solana，提供 publicKey / signTransaction / signAllTransactions，
-// AnchorProvider 正好需要这三个，补一层薄适配器即可。
-class PhantomWallet {
+// ── 浏览器钱包 → Anchor Wallet 适配 ──
+// Phantom / Solflare / Backpack / OKX 都按同一套约定注入 provider：
+// publicKey + connect() + signTransaction() + signAllTransactions()。
+// 所以不绑定某一家，谁在就用谁；AnchorProvider 只认这四样，补一层薄适配器即可。
+class InjectedWallet {
   constructor(provider) {
     this.provider = provider;
   }
@@ -117,6 +127,51 @@ class PhantomWallet {
   signAllTransactions(txs) {
     return this.provider.signAllTransactions(txs);
   }
+}
+
+// 注入点各不相同：Phantom 有 window.phantom.solana，Solflare 用 window.solflare，
+// Backpack 用 window.backpack，OKX 用 window.okxwallet.solana，
+// 还有一批钱包直接占 window.solana。按顺序取第一个能用的。
+const WALLET_CANDIDATES = [
+  { label: "Phantom", get: () => window.phantom?.solana ?? (window.solana?.isPhantom ? window.solana : null) },
+  { label: "Solflare", get: () => window.solflare },
+  { label: "Backpack", get: () => window.backpack },
+  { label: "OKX Wallet", get: () => window.okxwallet?.solana },
+  { label: "浏览器钱包", get: () => (window.solana?.connect ? window.solana : null) },
+];
+
+function detectWallet() {
+  for (const candidate of WALLET_CANDIDATES) {
+    try {
+      const provider = candidate.get();
+      if (provider && typeof provider.connect === "function") {
+        return { label: candidate.label, provider };
+      }
+    } catch {
+      // 某些扩展的 getter 会抛错，忽略继续找下一个
+    }
+  }
+  return null;
+}
+
+// 没有注入钱包时别只说「装 Phantom」：手机浏览器里本来就不会有扩展，
+// 正确做法是用钱包 App 内置浏览器打开本页。
+function showNoWalletHelp() {
+  const url = location.href;
+  const phantom = `https://phantom.app/ul/browse/${encodeURIComponent(url)}?ref=${encodeURIComponent(location.origin)}`;
+  ui.connectBtn.disabled = true;
+  ui.connectBtn.textContent = "没有检测到钱包";
+  ui.alertText.textContent = "";
+  ui.alertText.append(
+    "这个浏览器里没有钱包扩展。桌面端可安装 Phantom / Solflare / Backpack 任一；手机端请用钱包 App 的浏览器打开本页：",
+  );
+  const a = document.createElement("a");
+  a.href = phantom;
+  a.textContent = "用 Phantom App 打开";
+  a.target = "_blank";
+  a.rel = "noopener";
+  ui.alertText.append(a, "。装好扩展后刷新本页。");
+  ui.alert.classList.remove("hidden");
 }
 
 function showAlert(text) {
@@ -167,16 +222,18 @@ async function boot() {
   buildBoard();
   setupClusterUi();
 
-  if (!window.solana?.isPhantom) {
-    showAlert("没有检测到 Phantom 钱包。请先安装 Phantom 浏览器扩展，再刷新本页。本地版（首页）无需钱包也能玩。");
+  const found = detectWallet();
+  if (!found) {
+    showNoWalletHelp();
     return;
   }
+  ui.connectBtn.textContent = `连接 ${found.label}`;
 
   try {
     state.connection = new Connection(RPC_URL, "confirmed");
-    const wallet = new PhantomWallet(window.solana);
-    state.wallet = wallet;
-    state.provider = new anchor.AnchorProvider(state.connection, wallet, {
+    state.walletProvider = found.provider;
+    state.wallet = new InjectedWallet(found.provider);
+    state.provider = new anchor.AnchorProvider(state.connection, state.wallet, {
       commitment: "confirmed",
     });
     anchor.setProvider(state.provider);
@@ -189,7 +246,7 @@ async function boot() {
     state.program = new Program(idl, state.provider);
 
     // 已连接过就直接进入可用状态
-    if (window.solana.isConnected && window.solana.publicKey) {
+    if (found.provider.isConnected && found.provider.publicKey) {
       onConnected();
     }
   } catch (err) {
@@ -205,21 +262,28 @@ function bindEvents() {
   ui.joinForm.addEventListener("submit", onJoin);
   ui.copyBtn.addEventListener("click", copyPda);
   ui.joinGameBtn.addEventListener("click", onJoinGameClick);
+  ui.resignBtn.addEventListener("click", onResign);
+  ui.timeoutBtn.addEventListener("click", onClaimTimeout);
   ui.closeBtn.addEventListener("click", onClose);
   ui.leaveBtn.addEventListener("click", leaveGame);
+
+  // 超时是「等」出来的：每秒刷新一次倒计时，不重新读链
+  setInterval(() => {
+    if (state.account) updateProtocolButtons(state.account);
+  }, 1000);
 }
 
 async function onConnectClick() {
   try {
-    const resp = await window.solana.connect();
-    onConnected(resp.publicKey);
+    const resp = await state.walletProvider.connect();
+    onConnected(resp?.publicKey);
   } catch (err) {
     showAlert(`钱包连接被拒绝：${err.message}`);
   }
 }
 
 function onConnected(pubkey) {
-  const key = pubkey || window.solana.publicKey;
+  const key = pubkey || state.walletProvider.publicKey;
   clearAlert();
   ui.walletAddr.textContent = shortAddr(key);
   ui.connectBtn.textContent = "钱包已连接";
@@ -235,11 +299,11 @@ function onConnected(pubkey) {
 }
 
 async function checkNetwork() {
-  // 只用 RPC 配置提示该切到哪个 Phantom 网络。
+  // 只用 RPC 配置提示该切到哪个网络。
   // 不去比对 genesis 指纹：本地验证器每次 reset 都换 genesis，硬编码会误报。
   ui.networkNote.textContent = isLocalnet
-    ? `当前：本地验证器（${RPC_URL}）。请先把 Phantom 切到 Localhost，再建局。`
-    : `当前：Devnet（${RPC_URL}）。请把 Phantom 也切到 Devnet —— 网络不一致会签名失败。`;
+    ? `当前：本地验证器（${RPC_URL}）。请先把钱包切到 Localhost，再建局。`
+    : `当前：Devnet（${RPC_URL}）。请把钱包也切到 Devnet —— 网络不一致会签名失败。`;
   ui.networkNote.classList.remove("hidden");
   try {
     await state.connection.getGenesisHash(); // 探活：能拿到就说明 RPC 通
@@ -417,6 +481,8 @@ async function enterGame(pdaStr) {
 function leaveGame() {
   cleanupSubscription();
   state.pda = null;
+  state.account = null;
+  ui.timeoutHint.classList.add("hidden");
   ui.game.classList.add("hidden");
   ui.lobby.classList.remove("hidden");
   history.replaceState(null, "", CLUSTER_KEY ? `?cluster=${CLUSTER_KEY}` : location.pathname);
@@ -444,6 +510,7 @@ function buildBoard() {
 }
 
 function renderAccount(account) {
+  state.account = account;
   const board = account.board.map((code) => (code === 1 ? "O" : code === 2 ? "X" : ""));
   const stateKey = Object.keys(STATE_LABEL).find(
     (k) => account.state[k] !== undefined,
@@ -485,6 +552,63 @@ function renderAccount(account) {
     "hidden",
     !(stateKey === "waitingForOpponent" && !iamO),
   );
+
+  updateProtocolButtons(account);
+}
+
+/** 读取账户状态名的 helper：Anchor 把枚举解析成 { inProgress: {} } 这种形状 */
+function stateKeyOf(account) {
+  return Object.keys(STATE_LABEL).find((k) => account.state[k] !== undefined);
+}
+
+function chainNow(account) {
+  // Anchor 的 i64 解析成 BN；兜底成 Number 以防 IDL 以后换类型
+  const last = account.lastActivityAt ?? account.createdAt ?? 0;
+  return typeof last?.toNumber === "function" ? last.toNumber() : Number(last);
+}
+
+function fmtDuration(secs) {
+  const s = Math.max(0, Math.round(secs));
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60);
+  const rest = s % 60;
+  return rest ? `${m} 分 ${rest} 秒` : `${m} 分钟`;
+}
+
+/**
+ * 协议按钮：认输 + 判对方超时。
+ *
+ * 两条都只在「双方都在局中」时出现，因为只有在局中才可能卡住。
+ * 判超时只给「等着的那一方」——轮到自己时点它，链上会直接拒绝
+ * （OnlyOpponentCanClaimTimeout），前端先藏起来只是省一次失败交易。
+ */
+function updateProtocolButtons(account) {
+  const stateKey = stateKeyOf(account);
+  const myMark = walletMark(account);
+  const inGame = stateKey === "inProgress";
+
+  ui.resignBtn.classList.toggle("hidden", !(inGame && myMark));
+
+  const waitingOnOpponent =
+    inGame && myMark && (account.turn === 1 ? "O" : "X") !== myMark;
+  ui.timeoutBtn.classList.toggle("hidden", !waitingOnOpponent);
+  if (!waitingOnOpponent) {
+    ui.timeoutHint.classList.add("hidden");
+    return;
+  }
+
+  const idle = Math.max(0, Math.floor(Date.now() / 1000) - chainNow(account));
+  const left = TIMEOUT_SECS - idle;
+  ui.timeoutHint.classList.remove("hidden");
+  if (left > 0) {
+    ui.timeoutBtn.disabled = true;
+    ui.timeoutHint.textContent = `对方已 ${fmtDuration(idle)} 没落子，再等 ${fmtDuration(
+      left,
+    )} 就能判超时`;
+  } else {
+    ui.timeoutBtn.disabled = false;
+    ui.timeoutHint.textContent = `对方已 ${fmtDuration(idle)} 没落子，可以判超时了`;
+  }
 }
 
 function walletMark(account) {
@@ -575,6 +699,57 @@ async function copyPda() {
     setTxState("邀请链接已复制", "ok");
   } catch {
     setTxState(link, "idle");
+  }
+}
+
+// 认输：这是唯一能让「不想下了」的一方体面结束、并且把租金拿回来的路径。
+// 没有它，A-01（对局中禁止关局）会把双方一起锁死。
+async function onResign() {
+  if (state.busy || !state.pda) return;
+  const ok = window.confirm("认输后对手直接获胜，交易上链后无法撤回。确定认输吗？");
+  if (!ok) return;
+
+  state.busy = true;
+  setTxState("发送认输交易…", "busy");
+  try {
+    const sig = await state.program.methods
+      .resign()
+      .accountsPartial({ game: state.pda, player: state.wallet.publicKey })
+      .rpc();
+    setTxState(`已认输 ${sig.slice(0, 8)}…`, "ok", sig);
+    renderAccount(await state.program.account.game.fetch(state.pda));
+  } catch (err) {
+    setTxState("认输失败", "err");
+    showAlert(`认输失败：${err.message}`);
+  } finally {
+    state.busy = false;
+    if (state.pda) renderAccount(await state.program.account.game.fetch(state.pda));
+  }
+}
+
+// 判对方超时：链上按「最后活动时间 + 5 分钟」裁决，对手关掉浏览器也躲不过。
+// 前端只负责把按钮在倒计时结束后点亮，判不判得成由程序说了算。
+async function onClaimTimeout() {
+  if (state.busy || !state.pda) return;
+  const ok = window.confirm("确认对方已超过 5 分钟没有落子？交易上链后会判你获胜。");
+  if (!ok) return;
+
+  state.busy = true;
+  setTxState("发送超时判负交易…", "busy");
+  try {
+    const sig = await state.program.methods
+      .claimTimeout()
+      .accountsPartial({ game: state.pda, player: state.wallet.publicKey })
+      .rpc();
+    setTxState(`已判超时 ${sig.slice(0, 8)}…`, "ok", sig);
+    renderAccount(await state.program.account.game.fetch(state.pda));
+  } catch (err) {
+    setTxState("判超时失败", "err");
+    // 最常见的是本地时钟比链上快几秒，链上还没到点
+    showAlert(`判超时失败：${err.message}`);
+  } finally {
+    state.busy = false;
+    if (state.pda) renderAccount(await state.program.account.game.fetch(state.pda));
   }
 }
 

@@ -10,8 +10,8 @@
 | 能不能给人玩？ | 能。链上版任何人有 Phantom + Devnet 测试币即可开局，不需要后端；本地版 `docker compose up` 一条命令。 |
 | 记录可不可信？ | **链上版可信，本地版不可信**。链上棋谱由交易决定；本地版身份是座位凭证，不是密码学身份。 |
 | 规则有没有第二份实现？ | 没有。三个宿主共用 `nine-grid-core`，链上只保留身份校验。 |
-| 现在最大的风险？ | 缺超时/认输（A-03）：对手掉线，这局永久卡在 `InProgress`，租金也拿不回。 |
-| 能不能公开运营？ | 不能。未审计、未上主网，A-03 未修，且没有 TLS / 反代 / 备份。 |
+| 现在最大的风险？ | 本地版身份仍可自刷（A-02 残余），以及未审计、未上主网。卡局（A-03）、钱包兼容（A-06）、CDN 依赖（A-07）都已解决。 |
+| 能不能公开运营？ | 不能。未审计、未上主网，且没有 TLS / 反代 / 备份；A-02 的自刷与榜单口径也仍未解决。 |
 
 ## 一、架构（从信任边界看，而不是从目录看）
 
@@ -38,23 +38,22 @@
 |---|---|---|---|---|---|
 | A-01 | P0 | `chain/.../lib.rs` `CloseGame` | 对局进行中，创建者可以关掉账户 | 对手的棋谱、胜负、记录一起消失，且无任何救济手段。等于「快输了就掀桌」 | **已修** |
 | A-02 | P0 | `static/app.js`、`server/src/api.rs` | 身份是客户端自报的 UUID（localStorage 生成，请求体直接采信） | 知道别人 UUID 就能替他落子；两个浏览器可对刷战绩 | **部分修复**：加座位凭证，冒充已挡住；自刷与榜单口径仍未解决（见第四节） |
-| A-03 | P1 | 链上程序（仅 4 个指令） | 没有超时、认输、和棋协议 | 对手掉线 → 这局永远卡在 `InProgress`。A-01 修复后**连创建者也不能关**了，租金锁死 | 未修，见下方权衡 |
+| A-03 | P1 | 链上程序（原 4 个指令） | 没有超时、认输、和棋协议 | 对手掉线 → 这局永远卡在 `InProgress`。A-01 修复后**连创建者也不能关**了，租金锁死 | **已修**：新增 `resign` + `claim_timeout`（5 分钟），见第七节 |
 | A-04 | P1 | 仓库根目录 | 没有 Dockerfile / compose，`config.rs` 只读 `DATABASE_URL` 与 `BIND_ADDR` | 非开发者无法部署；「自托管」目前只是开发者选项 | **已修**：`Dockerfile` + `compose.yaml`，容器内冒烟 44/44 |
 | A-05 | P1 | `server/src/api.rs` | 无速率限制 | 任何人可无限建局把库刷大；SSE 连接也无上限 | **部分修复**：写接口按 IP 限流（默认 300/分钟，可配），SSE 并发仍无上限 |
-| A-06 | P1 | `static/chain.js` | 硬判断 `window.solana?.isPhantom` | 手机浏览器、Backpack、Solflare 全部进不来 | 未修 |
-| A-07 | P1 | `static/chain.html` importmap | Anchor / web3.js 从 `esm.sh` 加载 | CDN 不可达或被墙时整页白屏（此前已因 `Buffer` 缺 polyfill 踩过一次） | 已知，未消除 |
+| A-06 | P1 | `static/chain.js` | 硬判断 `window.solana?.isPhantom` | 手机浏览器、Backpack、Solflare 全部进不来 | **已修**：识别 Phantom / Solflare / Backpack / OKX，无扩展时给手机端入口，见第八节 |
+| A-07 | P1 | `static/chain.html` importmap | Anchor / web3.js 从 `esm.sh` 加载 | CDN 不可达或被墙时整页白屏（此前已因 `Buffer` 缺 polyfill 踩过一次） | **已修**：依赖进 `static/vendor/`，断 CDN 实测可建局，见第八节 |
 | A-08 | P1 | `chain/tests/nine-grid.ts` | 原「关局」用例写成 `try { fetch; assert.fail() } catch {}`，`assert.fail` 被自己的 catch 吞掉 | 账户没被关也能通过 —— 典型假绿，等于这条断言从没生效过 | **已修** |
 | A-09 | P2 | `server/src/db.rs` `leaderboard` | 按 `wins` 排序、无最小场次；`handle` 由玩家自填 | 赢一局可压过 20 场的人；昵称可重名抢注 | 未修 |
 | A-10 | P2 | 链上 | `close_game` 后该局从列表消失（交易仍在链上） | 与「任何人都能查棋谱」有张力；文档已写明只承诺「未被关掉的局」 | 已注明 |
 | A-11 | P2 | `verification/lean` | Lean 是对规则的**重述**，不是从 Rust 提取 | 两边可能同时走偏；靠 3⁹ 穷举比对兜底，而非证明 | 已注明 |
 
-### A-03 的权衡（写清楚，不藏）
+### A-03 的权衡（已落地，留档）
 
-A-01 的修复是「对局中不许关」。这带来一个直接后果：**对手跑掉，这局就永久卡住，租金也拿不回来。**
+A-01 的修复是「对局中不许关」，直接后果是：**对手跑掉，这局就永久卡住，租金也拿不回来。**
 
-- 现阶段可以接受：一局账户约 0.0016 SOL（Devnet 测试币），且创建者仍可在「等待入座」阶段撤回。
-- 正式版必须补：`resign`（认输，对手获胜）或基于最后落子时间的超时裁定。两者都需要新增指令，
-  并且要和 core 的终局语义对齐 —— 不是加个 `if` 就完事。
+当时的判断是「必须补认输或超时，并且要和 core 的终局语义对齐，不是加个 `if` 就完事」。
+后来补的时候，确实在 core 的一致性校验上撞了一次（见第七节）。设计取舍与残余风险都写在那里。
 
 ## 三、已修复：A-01（对局中可关局）
 
@@ -79,7 +78,7 @@ pub game: Account<'info, Game>,
 2. **先 `has_one` 再判状态**。别人拿你的局来试，得到的是「不是你的局」，不泄露对局是否进行中。
 3. **错误码单独给 `GameInProgress`**，前端能给出人话，而不是一句 `ConstraintRaw`。
 
-**测试同步**（11 项，`chain/tests/nine-grid.ts`）：
+**测试同步**（15 项，`chain/tests/nine-grid.ts`）：
 
 - 非建局者关局 → `ConstraintHasOne`；
 - 建局者在 `InProgress` 关局 → `GameInProgress`，并断言账户原封不动；
@@ -176,12 +175,98 @@ pub game: Account<'info, Game>,
    要么让代理自己限流（nginx `limit_req`），要么以后按可信代理白名单解析真实 IP。
 4. 只限频次，不限「库总量」：慢速刷一整天依然能把库撑大，需要清理策略，没做。
 
-## 七、复核方式（任何人都能自己跑）
+## 七、已修复：A-03（对局卡死、租金锁死）
+
+**问题**：A-01 禁止对局中关账户之后，只要一方掉线/不想下了，这局就永久停在 `InProgress`，
+双方租金（约 0.0016 SOL/局）都拿不回来，棋谱也停在半局。
+
+**修法**：新增两条指令，**不改 core**：
+
+| 指令 | 谁能发 | 前置条件 | 结果 |
+|---|---|---|---|
+| `resign()` | 局内任一方 | 状态必须是 `InProgress` | 对手获胜，进入终局（随后建局者可关局退租金） |
+| `claim_timeout()` | **等着的那一方** | `InProgress`，且距最后活动 ≥ 300 秒 | 发起方获胜 |
+
+四个设计决定，都有代价，写在这里备查：
+
+1. **超时看「最后活动时间」，不是「创建时间」。**
+   建局、入座、落子都会刷新它，否则一局下了十分钟的正常对局会被判超时。
+   实现上复用了原来的 `created_at` 字段并改名为 `last_activity_at`：**账户仍是 101 字节**，
+   老账户照常反序列化，不需要 `realloc`，也不需要迁移脚本。代价是字段语义变了，
+   棋谱馆的「时间」显示从「创建时间」变成「最后活动时间」。
+2. **core 里不加「认输」。** 认输不改变任何一格棋子，它是协议动作而不是棋盘规则。
+   把它塞进 `GameState` 会让 Lean 那 21 条定理、本地版重放、链上 `restore` 全部跟着改，
+   而且会污染「状态由棋盘决定」这条不变量。
+3. **因此撞到一个真实冲突（测试抓到的）**：认输产生的终局**没有三连线**，
+   `Game::restore` 的校验会认为「盘面与结果自相矛盾」，落子返回 `InconsistentState` 而不是 `GameAlreadyOver`。
+   修法是让 `play` 在进规则层之前先按账户状态短路；**规则层不迁就协议动作**，
+   它继续只认棋盘事实。这条如果不改，认输后对手点棋盘会看到一个莫名其妙的错误码。
+4. **300 秒是硬编码常量，不做成每局参数。** 一旦允许建局者自定义窗口，
+   就会出现「设 1 秒逼对手超时」的攻击面；要做也只能给下限。代价是长考局可能被误判（见残余风险）。
+
+**验证**：
+
+- 单测 11 项（新增 3 项：认输归属、超时归属、状态门禁；超时边界覆盖 299/300/时钟回拨）；
+- 链上 E2E 15 项（新增 4 项：认输成功、认输的三个拒绝分支、超时拒绝分支、活动时间随落子刷新），
+  另 1 项「等满 5 分钟」的成功路径默认跳过（`LIVE_TIMEOUT=1` 才跑），避免 CI 被拖长；
+- Devnet 实测：两个真实钱包建局 → 入座 → O 认输 → 显示「X 方获胜」→ 建局者关局退租金，全链路无报错；
+- 升级核对：`solana program dump` 与本地 `.so` 前 230608 字节 **0 差异**，尾部为扩容填充的 0。
+
+**残余风险（没解决的，别当成解决了）**：
+
+- 5 分钟是常量：思考很久的正规对局可能被对手判超时。正式版应做「每局可配 + 下限保护」。
+- 判罚只认链上 `Clock`。本地时钟偏差只影响按钮什么时候点亮，不影响裁决结果（链上会拒绝过早的申领）。
+- 没有「和棋协议」：双方都掉线的局，谁先回来谁赢。
+- 认输/超时的终局在棋盘上没有三连线，棋谱馆需要靠状态文案解释，不能只画连线。
+
+## 八、已修复：A-06（只认 Phantom）、A-07（依赖 CDN）
+
+**A-06：钱包不再写死一家。** 浏览器钱包的注入点是各自的：
+
+| 钱包 | 注入位置 |
+|---|---|
+| Phantom | `window.phantom.solana`（旧版也占 `window.solana`） |
+| Solflare | `window.solflare` |
+| Backpack | `window.backpack` |
+| OKX | `window.okxwallet.solana` |
+| 其他 | 直接占 `window.solana` |
+
+按顺序取第一个有 `connect()` 的 provider，用同一层薄适配器喂给 `AnchorProvider` ——
+它们都实现了 `publicKey / connect / signTransaction / signAllTransactions`，不需要引入整套
+wallet-adapter（那会带来构建步骤和几百 KB 依赖，与「纯静态、无构建」的取舍冲突）。
+
+手机上没有扩展时，不再只说「装 Phantom」，而是给「用 Phantom App 打开」的深链
+（`phantom.app/ul/browse/<当前页>`）——手机端本来就该用钱包内置浏览器。
+
+**A-07：依赖进仓库，不再依赖 CDN。** 从 esm.sh 取 `?bundle` 产物（子依赖已内联、
+无外部 `import`），放进 `crates/server/static/vendor/`：
+
+| 文件 | 大小 | 用途 |
+|---|---|---|
+| `anchor.bundle.mjs` | 583 KB | `@coral-xyz/anchor@0.32.1` |
+| `web3.bundle.mjs` | 331 KB | `@solana/web3.js@1.98.4` |
+| `buffer.bundle.mjs` | 28 KB | Node `Buffer` polyfill（挂在 `globalThis`） |
+
+importmap 改为指向本地文件；`chain.html` 与 `chain-archive.html` 都换了。
+GitHub Pages 的组装脚本同步复制 `vendor/`（`pages.yml` 里加了一行 `cp`，并在 `paths` 里加了
+`crates/server/static/vendor/**` 触发条件）。
+
+**验证**：Playwright 拦截并阻断所有 `esm.sh` 请求后打开链上页 —— **0 次外部请求**，
+连接钱包、建局、撤回全部成功，无 console 报错。这比「打开一次让它进缓存」可靠：缓存会过期，
+而文件在仓库里。
+
+**残余风险**：
+
+- 桌面端只验证了「注入式 provider + 模拟钱包」与真实 Devnet 交易，**没有在每个钱包扩展里逐一走查**；
+- bundle 由 esm.sh 生成，不是我们自己从 npm 构建，未逐行审计；升级依赖时要重新取产物并同步
+  `chain/package.json` 的版本，否则前端与测试用的 SDK 版本会漂移。
+
+## 九、复核方式（任何人都能自己跑）
 
 ```bash
 cargo test -p nine-grid-core -p nine-grid-bot   # 35 项
 bash scripts/smoke.sh                           # 44 项（需先起服务与 Postgres）
-bash scripts/chain-test.sh                      # 11 项真实交易 + 前端交易构造
+bash scripts/chain-test.sh                      # 15 项真实交易 + 前端交易构造
 just browser-e2e                                # 浏览器全链路（模拟 Phantom）
 just lean-verify && just lean-compare           # 21 条定理 + 19683 棋盘逐行比对
 ```
@@ -189,9 +274,10 @@ just lean-verify && just lean-compare           # 21 条定理 + 19683 棋盘逐
 链上部分的关键证据不是「测试绿了」，而是：**部署后的程序在真实验证器上拒绝了非法交易**。
 A-01 的验证方式是构造一笔「对局中关局」的交易，确认返回 `GameInProgress` 且账户未被关闭。
 
-## 八、本次审计没有做的事
+## 十、本次审计没有做的事
 
 - 没有做形式化验证之外的密码学审计（无自研密码学，风险低）。
 - 没有审计 Anchor 0.32.1 与 `@coral-xyz/anchor` 本身的已知问题。
-- 没有做前端供应链审计（`esm.sh` 的实际产物未逐行核对，只确认了加载路径）。
+- 没有做前端供应链审计（vendored 的 esm.sh bundle 未逐行核对，只确认了它能离线工作）。
+- 没有在真实手机上用 Phantom / Solflare App 走查（只验证了桌面注入式 provider 与模拟钱包）。
 - 没有在真机 Phantom 上走查（自动化是注入模拟 provider，不是真实扩展）。这一条仍需要人手动过一遍。

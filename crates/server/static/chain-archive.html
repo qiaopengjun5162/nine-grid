@@ -10,18 +10,19 @@
   <!--
     只读页面：不需要钱包、不需要签名，也不需要后端。
     Anchor 只用来做账户解码与指令解码，因此仍然要加载 web3.js。
+    依赖随仓库托管在 vendor/（esm.sh 的 ?bundle 产物，自包含），断网也能打开。
   -->
   <script type="importmap">
   {
     "imports": {
-      "@coral-xyz/anchor": "https://esm.sh/@coral-xyz/anchor@0.32.1?target=es2022",
-      "@solana/web3.js": "https://esm.sh/@solana/web3.js@1.98.4?target=es2022"
+      "@coral-xyz/anchor": "./vendor/anchor.bundle.mjs",
+      "@solana/web3.js": "./vendor/web3.bundle.mjs"
     }
   }
   </script>
   <!-- web3.js / Anchor 内部仍会用到 Node 的 Buffer，必须显式挂到全局（见 README 第十章的假绿事故） -->
   <script type="module">
-    import { Buffer } from "https://esm.sh/buffer@6.0.3?target=es2022";
+    import { Buffer } from "./vendor/buffer.bundle.mjs";
     globalThis.Buffer = Buffer;
   </script>
   <script>

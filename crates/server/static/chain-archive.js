@@ -142,7 +142,7 @@ function normalize(publicKey, account) {
     hasX: playerX !== PublicKey.default.toBase58(),
     board: Array.from(account.board, Number),
     moves: Number(account.moves),
-    createdAt: Number(account.createdAt.toString()),
+    lastActivityAt: Number(account.lastActivityAt.toString()),
     gameId: account.gameId.toString(),
   };
 }
@@ -209,7 +209,7 @@ async function loadGames() {
     const all = await state.program.account.game.all();
     state.games = all
       .map(({ publicKey, account }) => normalize(publicKey, account))
-      .sort((a, b) => b.createdAt - a.createdAt || b.moves - a.moves);
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt || b.moves - a.moves);
     clearAlert();
   } catch (err) {
     // 公共 RPC 可能禁用 getProgramAccounts。这时列表不可用，但单局查询仍然可行。
@@ -287,7 +287,7 @@ function renderList() {
             </div>
             <div class="arc-meta">
               <span>${g.moves} 手</span>
-              <span>${fmtTime(g.createdAt)}</span>
+              <span>${fmtTime(g.lastActivityAt)}</span>
               <a href="${explorerAccount(g.pda)}" target="_blank" rel="noopener">浏览器 ↗</a>
             </div>
           </div>

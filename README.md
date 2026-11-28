@@ -15,7 +15,7 @@
 > 三个棋子横、竖、斜连成一条直线即获胜。规则只有一句话，正好用来练「把状态机写对」这件事。
 
 当前状态：**本地版 + 链上版都已跑通** —— 建局 → 邀请 → 轮流落子 → 规则裁决 → 终局 → 棋谱回放，
-外加「一个人也能下」的机器人（简单 / 中等 / 困难三档）。本地版端到端检查、链上版 11 项真实交易测试全过。
+外加「一个人也能下」的机器人（简单 / 中等 / 困难三档）。本地版端到端检查、链上版 15 项真实交易测试全过（另 1 项 5 分钟超时长测默认跳过）。
 
 两个阶段共用**同一份规则代码**（`crates/core`）：本地版和 Solana 链上程序都调用它，规则只有一份。
 先做本地版再上链的理由，以及迁移时哪些代码没动，见文末。
@@ -120,13 +120,13 @@ nine-grid/
 │   └── 0002_bot_difficulty.sql
 ├── scripts/
 │   ├── smoke.sh                # 本地版 44 项端到端检查
-│   ├── chain-test.sh           # 链上端到端：验证器+部署+11 项测试+前端交易验证，自包含
+│   ├── chain-test.sh           # 链上端到端：验证器+部署+15 项测试+前端交易验证，自包含
 │   └── browser-e2e.sh/.py      # 浏览器端到端：模拟 Phantom 走真实 UI 三局 + 棋谱馆还原棋谱
 ├── chain/                      # Solana + Anchor 链上程序（已接入 core）
-│   ├── programs/nine-grid/     # 指令：create/join/play/close，规则委托 core
+│   ├── programs/nine-grid/     # 指令：create/join/play/resign/claim_timeout/close，规则委托 core
 │   │   └── src/{lib,state,errors}.rs
 │   ├── Anchor.toml
-│   └── tests/nine-grid.ts      # 11 项真实链上交易测试
+│   └── tests/nine-grid.ts      # 15 项真实链上交易测试（+1 项 5 分钟长测）
 ├── verification/lean/          # Lean 4 形式化验证：判胜规格 + 状态机不变量，零 sorry
 │   ├── NineGrid/{Basic,Winner,Game}.lean
 │   ├── Dump.lean               # 导出全部 19683 个棋盘的判胜结果
@@ -305,7 +305,7 @@ just check                       # = fmt + taplo + clippy + test + audit（和 C
 cargo test                       # 35 个单元测试（core 22 + bot 13）
 bash scripts/smoke.sh            # 本地版 44 项端到端检查（服务需先跑起来）
 just chain-unit                  # 链上 Rust 单测（含 19683 棋盘一致性）
-just chain-test                  # 链上端到端：验证器+部署+11 项真实交易
+just chain-test                  # 链上端到端：验证器+部署+15 项真实交易
 just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI（三局 + 棋谱馆还原棋谱）
 ```
 
@@ -323,7 +323,7 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 冒烟脚本覆盖了正常对局 + 全部拒绝分支（不是你的回合、格子被占、版本过期、非玩家、终局后落子、第三人加入……）。
 
 链上还有一条关键的**一致性测试** `judge_matches_core_on_all_19683_boards`：把 3⁹ 种棋盘在链上账户编码和 core 之间反复往返，
-证明「u8 盘面 → core 判胜」这条桥不丢信息。链上端到端测试 11 项跑在真实 `solana-test-validator` 上，
+证明「u8 盘面 → core 判胜」这条桥不丢信息。链上端到端测试 15 项跑在真实 `solana-test-validator` 上，
 用部署后的 `.so` 发真实交易，覆盖完整对局 + 全部拒绝分支 + 终局冻结 + 关账户退租金。
 
 ---
@@ -480,7 +480,7 @@ just browser-e2e                 # 浏览器 E2E：模拟 Phantom 走真实 UI�
 ## 十一、上链：哪些换了宿主，哪些一行没动
 
 阶段 B 已经做完并跑通。链上程序用 Anchor 0.32.1，程序 ID `AtRporBXQDCnT5ibxMic5joWwj2qJ6UpoBQgw5Yu4HD6`，
-4 个指令（create_game / join_game / play / close_game），11 项真实交易测试全过，另有前端交易构造验证。
+6 个指令（create_game / join_game / play / resign / claim_timeout / close_game），15 项真实交易测试全过，另有前端交易构造验证。
 
 | 本地版 | 链上版 | 规则代码要改吗 |
 |---|---|---|
@@ -522,12 +522,21 @@ core 为适配链上只新增了几个**纯存储桥接**方法：`Board::from_c
 ### 链上前端：`/chain.html`，一个能连 Phantom 的页面
 
 浏览器端的"另一半"已经补齐。打开 `/chain.html`，连 Phantom 就能建局、凭 PDA 地址入座、
-点击落子、终局后关局退租金。几个实现上的取舍：
+点击落子、认输或判对方超时、终局后关局退租金。几个实现上的取舍：
 
-- **无构建步骤**：Anchor 和 web3.js 通过 importmap 从 esm.sh 按 ESM 加载（版本与 `chain/package.json` 对齐），
+- **两条「结束这局」的路，都不是摆设**：
+  - `认输`：局内任一方可点，对手获胜。没有它，「对局中不许关账户」（A-01）会把双方一起锁死；
+  - `判对方超时`：只有**等着的那一方**能点。链上按「最后活动时间 + 5 分钟」裁决，
+    建局/入座/每落一手都会续期，所以只惩罚「轮到你了却一直不动」。
+    按钮由前端倒计时点亮，但**判不判得成由程序说了算** —— 本地时钟快几秒，链上会直接拒绝。
+  两条指令都不改 `crates/core`：认输不改变任何一格棋子，它是协议动作；core 继续只表达棋盘事实。
+
+- **无构建步骤，也不依赖 CDN**：Anchor / web3.js / Buffer 的 **bundle 产物直接进仓库**
+  （`crates/server/static/vendor/*.mjs`，取自 esm.sh 的 `?bundle`，子依赖已内联、无外部 import），
+  importmap 指向本地文件（版本与 `chain/package.json` 对齐：anchor 0.32.1、web3.js 1.98.4），
   IDL 本地托管在 `/chain/idl.json` —— 页面是纯静态文件，不需要打包器。
   ESM 依赖**不会**自动提供 Node 的全局 `Buffer`，而 `chain.js` 顶层第一句就是 `Buffer.from("game")`；
-  所以另有一行 `import { Buffer } from "esm.sh/buffer"` 挂到 `globalThis`，且必须排在 `chain.js` 前面
+  所以另有一行 `import { Buffer } from "./vendor/buffer.bundle.mjs"` 挂到 `globalThis`，且必须排在 `chain.js` 前面
   —— 少了它整个模块会在顶层崩溃、连钱包按钮都点不动。这条是踩过坑才补的，别删。
 - **两种链上验证，缺一不可**：`chain-test.sh` 用 Node keypair 直接调 `program.methods`，
   证明交易构造对；`browser-e2e.sh` 用 Playwright 注入模拟 Phantom，走**真实 UI**

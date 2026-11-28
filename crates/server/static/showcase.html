@@ -344,7 +344,7 @@
         <div class="host">
           <div class="k">nine-grid (Anchor)</div>
           <h3>链上程序</h3>
-          <p>create / join / play / close。PDA 托管棋局，关局退租金。</p>
+          <p>create / join / play / resign / claim_timeout / close。PDA 托管棋局，认输与超时都能收尾。</p>
         </div>
       </div>
     </div>
@@ -362,7 +362,7 @@
       <div class="f"><div class="k">03</div><h3>实时观战</h3><p>SSE 推送，另一个窗口就能看这盘棋。</p></div>
       <div class="f"><div class="k">04</div><h3>回放时间轴</h3><p>逐手回退，看胜线是在哪一手形成的。</p></div>
       <div class="f"><div class="k">05</div><h3>战绩榜</h3><p>只统计真人对真人，机器人局不进榜，防刷。</p></div>
-      <div class="f"><div class="k">06</div><h3>链上对局</h3><p>Phantom 签名，PDA 托管，关局退回租金。</p></div>
+      <div class="f"><div class="k">06</div><h3>链上对局</h3><p>Phantom 签名，PDA 托管；认输 / 5 分钟超时判负 / 关局退回租金。</p></div>
       <div class="f"><div class="k">07</div><h3>链上棋谱馆</h3><p>账户只存终局快照；棋谱从交易里重建，并与账户比对。</p></div>
       <div class="f"><div class="k">08</div><h3>双主题</h3><p>古典与星穹会员版，一键切换，共用同一份 DOM。</p></div>
     </div>
@@ -377,7 +377,7 @@
     <div class="layers">
       <div class="layer"><div class="num">35<small>个</small></div><h3>单元测试</h3><p>规则对不对。core 22 + bot 13，含 3⁹ 穷举与「机器人 200 局不输」。</p></div>
       <div class="layer"><div class="num">44<small>项</small></div><h3>端到端冒烟</h3><p>真 Postgres + 真二进制。服务能不能起来、落库是不是真的、拒绝分支全不全。</p></div>
-      <div class="layer"><div class="num">11<small>项</small></div><h3>链上 E2E</h3><p>真验证器 + 真交易。完整对局、全部拒绝分支、终局冻结、对局中不许关局、关账户退租金。</p></div>
+      <div class="layer"><div class="num">15<small>项</small></div><h3>链上 E2E</h3><p>真验证器 + 真交易。完整对局、全部拒绝分支、终局冻结、对局中不许关局、认输与超时判负、关账户退租金。</p></div>
       <div class="layer"><div class="num">3<small>局</small></div><h3>浏览器 E2E</h3><p>模拟 Phantom 走真实 UI：连钱包 → 建局 → 入座 → 落子 → 判胜 → 棋谱馆。</p></div>
       <div class="layer"><div class="num">21<small>条</small></div><h3>形式化定理</h3><p>零 <span class="mono">sorry</span>。规则在任意输入上成不成立，以及它在什么前提下才成立。</p></div>
     </div>

@@ -314,9 +314,14 @@ fn event_to_sse(event: GameEvent) -> Event {
 }
 
 /// 战绩榜：只统计真人对真人的对局（机器人对局不进榜，避免刷榜）。
+///
+/// `min_games` 一并返回，前端才能把「还没人满 5 局」和「一局都没下过」区分开。
 async fn leaderboard(State(app): State<AppState>) -> Result<Json<Value>, AppError> {
     let entries = db::leaderboard(&app.pool).await?;
-    Ok(Json(json!({ "entries": entries })))
+    Ok(Json(json!({
+        "entries": entries,
+        "min_games": db::MIN_RANKED_GAMES,
+    })))
 }
 
 fn normalize_code(raw: &str) -> Result<String, AppError> {

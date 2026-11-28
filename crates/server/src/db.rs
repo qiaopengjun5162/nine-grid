@@ -405,7 +405,14 @@ pub struct LeaderboardEntry {
     pub win_rate: f64,
 }
 
-/// 战绩榜：只统计真人对真人的终局对局。
+/// 上榜门槛：真人终局对局不足这个数就不进榜。
+///
+/// 原来只按 `wins` 排序，赢一局的新号就能压过下了二十场的人 —— 那个榜只能当
+/// 「谁赢过」，不能当排名。改成「满 N 局才参与排名，按胜率排」，样本太小的
+/// 极端值（1 战 1 胜）就不会出现在榜首。
+pub const MIN_RANKED_GAMES: i64 = 5;
+
+/// 战绩榜：只统计真人对真人的终局对局，且满 [`MIN_RANKED_GAMES`] 局才上榜。
 ///
 /// 为什么排除人机局：否则挂个简单机器人刷一百局就能霸榜，数字就失去意义了。
 /// 判定"人机局"的办法是看这局有没有机器人座位（player_id = BOT_ID）——
@@ -443,10 +450,15 @@ pub async fn leaderboard(pool: &PgPool) -> Result<Vec<LeaderboardEntry>, AppErro
                 count(*) filter (where result = 'draw')::bigint as draws
            from per_player
           group by player_id
-          order by wins desc, draws desc, played desc
+         having count(*) >= $2
+          order by
+            (count(*) filter (where result = 'win'))::float8 / count(*) desc,
+            count(*) desc,
+            wins desc
           limit 50",
     )
     .bind(BOT_ID)
+    .bind(MIN_RANKED_GAMES)
     .fetch_all(pool)
     .await?;
 

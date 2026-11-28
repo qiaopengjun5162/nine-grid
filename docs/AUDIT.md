@@ -37,14 +37,14 @@
 | 编号 | 级别 | 位置 | 问题 | 影响 | 状态 |
 |---|---|---|---|---|---|
 | A-01 | P0 | `chain/.../lib.rs` `CloseGame` | 对局进行中，创建者可以关掉账户 | 对手的棋谱、胜负、记录一起消失，且无任何救济手段。等于「快输了就掀桌」 | **已修** |
-| A-02 | P0 | `static/app.js`、`server/src/api.rs` | 身份是客户端自报的 UUID（localStorage 生成，请求体直接采信） | 知道别人 UUID 就能替他落子；两个浏览器可对刷战绩 | **部分修复**：加座位凭证，冒充已挡住；自刷与榜单口径仍未解决（见第四节） |
+| A-02 | P0 | `static/app.js`、`server/src/api.rs` | 身份是客户端自报的 UUID（localStorage 生成，请求体直接采信） | 知道别人 UUID 就能替他落子；两个浏览器可对刷战绩 | **部分修复**：加座位凭证，冒充已挡住；榜单口径已改（满 5 局按胜率），自刷仍未解决（见第四节） |
 | A-03 | P1 | 链上程序（原 4 个指令） | 没有超时、认输、和棋协议 | 对手掉线 → 这局永远卡在 `InProgress`。A-01 修复后**连创建者也不能关**了，租金锁死 | **已修**：新增 `resign` + `claim_timeout`（5 分钟），见第七节 |
-| A-04 | P1 | 仓库根目录 | 没有 Dockerfile / compose，`config.rs` 只读 `DATABASE_URL` 与 `BIND_ADDR` | 非开发者无法部署；「自托管」目前只是开发者选项 | **已修**：`Dockerfile` + `compose.yaml`，容器内冒烟 44/44 |
+| A-04 | P1 | 仓库根目录 | 没有 Dockerfile / compose，`config.rs` 只读 `DATABASE_URL` 与 `BIND_ADDR` | 非开发者无法部署；「自托管」目前只是开发者选项 | **已修**：`Dockerfile` + `compose.yaml`，容器内冒烟全过（当时 44 项） |
 | A-05 | P1 | `server/src/api.rs` | 无速率限制 | 任何人可无限建局把库刷大；SSE 连接也无上限 | **部分修复**：写接口按 IP 限流（默认 300/分钟，可配），SSE 并发仍无上限 |
 | A-06 | P1 | `static/chain.js` | 硬判断 `window.solana?.isPhantom` | 手机浏览器、Backpack、Solflare 全部进不来 | **已修**：识别 Phantom / Solflare / Backpack / OKX，无扩展时给手机端入口，见第八节 |
 | A-07 | P1 | `static/chain.html` importmap | Anchor / web3.js 从 `esm.sh` 加载 | CDN 不可达或被墙时整页白屏（此前已因 `Buffer` 缺 polyfill 踩过一次） | **已修**：依赖进 `static/vendor/`，断 CDN 实测可建局，见第八节 |
 | A-08 | P1 | `chain/tests/nine-grid.ts` | 原「关局」用例写成 `try { fetch; assert.fail() } catch {}`，`assert.fail` 被自己的 catch 吞掉 | 账户没被关也能通过 —— 典型假绿，等于这条断言从没生效过 | **已修** |
-| A-09 | P2 | `server/src/db.rs` `leaderboard` | 按 `wins` 排序、无最小场次；`handle` 由玩家自填 | 赢一局可压过 20 场的人；昵称可重名抢注 | 未修 |
+| A-09 | P2 | `server/src/db.rs` `leaderboard` | 按 `wins` 排序、无最小场次；`handle` 由玩家自填 | 赢一局可压过 20 场的人；昵称可重名抢注 | **部分修复**：满 5 局才上榜、按胜率排序；昵称重名仍未解决 |
 | A-10 | P2 | 链上 | `close_game` 后该局从列表消失（交易仍在链上） | 与「任何人都能查棋谱」有张力；文档已写明只承诺「未被关掉的局」 | 已注明 |
 | A-11 | P2 | `verification/lean` | Lean 是对规则的**重述**，不是从 Rust 提取 | 两边可能同时走偏；靠 3⁹ 穷举比对兜底，而非证明 | 已注明 |
 
@@ -54,6 +54,15 @@ A-01 的修复是「对局中不许关」，直接后果是：**对手跑掉，�
 
 当时的判断是「必须补认输或超时，并且要和 core 的终局语义对齐，不是加个 `if` 就完事」。
 后来补的时候，确实在 core 的一致性校验上撞了一次（见第七节）。设计取舍与残余风险都写在那里。
+
+### A-09 的处理（榜单口径）
+
+原来的榜单按 `wins` 排序、没有最小场次：一个新号赢一局就能压过下了二十场的人。
+现在改成 **满 5 局才上榜、按胜率排序**（同胜率比场次），并把 `min_games` 一起返回，
+前端能区分「一局都没下过」和「还没人满 5 局」。冒烟里加了两条：只下 1 局不进榜、满 5 局进榜且 `played=5`。
+
+`handle` 重名仍然没解决：昵称是玩家自填的自由文本，抢注同名在库里是允许的。
+真要修需要「昵称唯一 + 改名冷却」，属于产品决策，不是这一轮的范围。
 
 ## 三、已修复：A-01（对局中可关局）
 
@@ -107,7 +116,7 @@ pub game: Account<'info, Game>,
 - 落子与邀请机器人必须带 `seat_token`，否则 `missing_seat_token`；带了但对不上 `bad_seat_token`。
 - 校验顺序：先判「是不是这个座位的人」再判凭证 —— 路人仍然得到 `not_a_player`，不会因为没凭证就变成另一类错误。
 - 前端把凭证按房间号存 `localStorage`；换设备打开同一局，能看、不能下（提示「这局不是从这台设备开的」）。
-- 冒烟从 42 项增到 44 项，专门有两条拒绝用例：不带凭证、凭证不对。
+- 冒烟从 42 项增到 44 项（榜单门槛用例再加 1 项，现 45 项），专门有两条拒绝用例：不带凭证、凭证不对。
 
 **残余风险（没解决，别当成解决了）**：
 
@@ -141,7 +150,7 @@ pub game: Account<'info, Game>,
 | `docker compose up -d --build` | 冷构建 15m50s（含拉基础镜像与 release LTO），两个容器 healthy |
 | `docker compose exec app id` | `uid=10001(ninegrid)`，不是 root |
 | 空库启动 | 日志出现「数据库已就绪，migrations 已应用」，无需手工建表 |
-| `BASE_URL=… bash scripts/smoke.sh` | **44/44 通过** |
+| `BASE_URL=… bash scripts/smoke.sh` | **45/45 通过** |
 | `docker compose restart app` 后查同一局 | 棋局还在（数据在 `pgdata` 卷） |
 
 **这没解决什么**（别说成「能对外运营了」）：
@@ -164,7 +173,7 @@ pub game: Account<'info, Game>,
 - 时间从参数注入（`check_at`），所以「回填」这件事能用假时钟单测，不靠 sleep。
 
 **实测**：`RATE_LIMIT_PER_MIN=3` 启动后连发 5 次建局 → `201 201 201 429 429`，
-`Retry-After: 19`；同一时刻连读 8 次 `GET /api/leaderboard` 全是 `200`；默认配置下冒烟 44/44 不受影响。
+`Retry-After: 19`；同一时刻连读 8 次 `GET /api/leaderboard` 全是 `200`；默认配置下冒烟全部通过。
 
 **这没解决什么**：
 
@@ -265,7 +274,7 @@ GitHub Pages 的组装脚本同步复制 `vendor/`（`pages.yml` 里加了一行
 
 ```bash
 cargo test -p nine-grid-core -p nine-grid-bot   # 35 项
-bash scripts/smoke.sh                           # 44 项（需先起服务与 Postgres）
+bash scripts/smoke.sh                           # 45 项（需先起服务与 Postgres）
 bash scripts/chain-test.sh                      # 15 项真实交易 + 前端交易构造
 just browser-e2e                                # 浏览器全链路（模拟 Phantom）
 just lean-verify && just lean-compare           # 21 条定理 + 19683 棋盘逐行比对

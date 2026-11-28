@@ -597,8 +597,10 @@ async function loadLeaderboard() {
   try {
     const data = await api("/api/leaderboard");
     const entries = data.entries ?? [];
+    const minGames = data.min_games ?? 5;
     if (entries.length === 0) {
-      body.innerHTML = '<tr><td colspan="4" class="board-empty">还没有真人对局，先下一盘吧</td></tr>';
+      // 「一局都没下过」和「有人下过但没满门槛」是两件事，别混成一句话
+      body.innerHTML = `<tr><td colspan="4" class="board-empty">还没有人打满 ${minGames} 局真人对局（满 ${minGames} 局才上榜）</td></tr>`;
       return;
     }
     body.innerHTML = entries

@@ -152,14 +152,23 @@ check "战绩榜接口可用" "array" "$([ "$(echo "$LB_BODY" | jq -r '.entries 
 LB_A=$(uuidgen | tr 'A-Z' 'a-z')
 LB_B=$(uuidgen | tr 'A-Z' 'a-z')
 LB_SOLO=$(uuidgen | tr 'A-Z' 'a-z')
-LVIEW=$(post /api/games "{\"player_id\":\"$LB_A\"}")
-LC=$(echo "$LVIEW" | jq -r .code)
-TLA=$(echo "$LVIEW" | jq -r .seat_token)
-TLB=$(post "/api/games/$LC/join" "{\"player_id\":\"$LB_B\"}" | jq -r .seat_token)
-for P in 0 3 1 4 2; do
-  if [ "$P" = 0 ] || [ "$P" = 1 ] || [ "$P" = 2 ]; then WHO=$LB_A; TK=$TLA; else WHO=$LB_B; TK=$TLB; fi
-  post "/api/games/$LC/moves" "{\"player_id\":\"$WHO\",\"position\":$P,\"seat_token\":\"$TK\"}" > /dev/null
-done
+
+# 只下一局时不能上榜（门槛 5 局），下满 5 局才出现 —— 顺带验证门槛真的生效
+play_one_human_game() {
+  LVIEW=$(post /api/games "{\"player_id\":\"$LB_A\"}")
+  LC=$(echo "$LVIEW" | jq -r .code)
+  TLA=$(echo "$LVIEW" | jq -r .seat_token)
+  TLB=$(post "/api/games/$LC/join" "{\"player_id\":\"$LB_B\"}" | jq -r .seat_token)
+  for P in 0 3 1 4 2; do
+    if [ "$P" = 0 ] || [ "$P" = 1 ] || [ "$P" = 2 ]; then WHO=$LB_A; TK=$TLA; else WHO=$LB_B; TK=$TLB; fi
+    post "/api/games/$LC/moves" "{\"player_id\":\"$WHO\",\"position\":$P,\"seat_token\":\"$TK\"}" > /dev/null
+  done
+}
+play_one_human_game
+LB_ONCE=$(curl -s "$BASE/api/leaderboard")
+check "只下 1 局不进榜（满 5 局才上榜）" "false" \
+  "$(echo "$LB_ONCE" | jq -e --arg id "$LB_A" '.entries[] | select(.player_id==$id)' >/dev/null && echo true || echo false)"
+for _ in 2 3 4 5; do play_one_human_game; done
 SVIEW=$(post /api/games "{\"player_id\":\"$LB_SOLO\"}")
 SC=$(echo "$SVIEW" | jq -r .code)
 TSC=$(echo "$SVIEW" | jq -r .seat_token)
@@ -169,8 +178,8 @@ for P in 0 1 2 3 4 5; do
   [ "$(echo "$RES" | jq -r .state)" != in_progress ] && break
 done
 LB_FRESH=$(curl -s "$BASE/api/leaderboard")
-check "真人局进战绩榜" "true" \
-  "$(echo "$LB_FRESH" | jq -e --arg id "$LB_A" '.entries[] | select(.player_id==$id)' >/dev/null && echo true || echo false)"
+check "满 5 局后进榜且战绩为 5 局" "5" \
+  "$(echo "$LB_FRESH" | jq -r --arg id "$LB_A" '.entries[] | select(.player_id==$id) | .played')"
 check "人机局不进战绩榜" "false" \
   "$(echo "$LB_FRESH" | jq -e --arg id "$LB_SOLO" '.entries[] | select(.player_id==$id)' >/dev/null && echo true || echo false)"
 

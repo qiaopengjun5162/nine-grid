@@ -6,6 +6,20 @@ pub use nine_grid_core::{
 
 /// 格子为空
 pub const EMPTY: u8 = 0;
+/// 多久没有任何动静就算「弃局」（秒）。建局、入座、落子都会刷新活动时间。
+///
+/// 为什么是 300：一局九宫棋实际不到两分钟；给到 5 分钟是留给「想很久」的人，
+/// 同时保证对手掉线时不会无限期卡住、租金也不会被永久锁死。
+pub const TIMEOUT_SECS: i64 = 300;
+
+/// 超时判定：距最后一次活动是否已经超过 [`TIMEOUT_SECS`]。
+///
+/// 单独抽成纯函数，是为了能在单测里覆盖边界，而不必真的等 5 分钟。
+/// `now < last`（时钟回拨）时按「没超时」处理，宁可多等也不误判。
+#[must_use]
+pub const fn timeout_elapsed(now: i64, last_activity_at: i64) -> bool {
+    now.saturating_sub(last_activity_at) >= TIMEOUT_SECS
+}
 /// 先手方（O 方），同时也是对局的创建者、租金的支付者
 pub const MARK_O: u8 = 1;
 /// 后手方（X 方）
@@ -81,8 +95,13 @@ pub struct Game {
     pub game_id: u64,
     /// 已落子数量，等于 9 且无胜者即为平局
     pub moves: u8,
-    /// 创建时间（链上时钟，秒）
-    pub created_at: i64,
+    /// 最后一次活动时间（链上时钟，秒）：建局、入座、落子都会刷新。
+    ///
+    /// 这个字段原本叫 `created_at`（只在建局时写一次）。为了在不改账户布局、
+    /// 不迁移老账户的前提下支持超时判定，改成「最后活动时间」语义 ——
+    /// 字节位置和类型都没变，老账户仍能正确反序列化（值是创建时间，
+    /// 对超时而言只会更早触发，不会漏判）。
+    pub last_activity_at: i64,
     /// PDA bump，保存下来省掉后续重复计算
     pub bump: u8,
 }
@@ -172,7 +191,7 @@ mod tests {
                 state: GameState::InProgress,
                 game_id: 0,
                 moves: codes.iter().filter(|&&c| c != EMPTY).count() as u8,
-                created_at: 0,
+                last_activity_at: 0,
                 bump: 0,
             };
             assert_eq!(game.judge(), expected, "第 {mask} 种棋盘判胜不一致");
@@ -189,7 +208,7 @@ mod tests {
             state: GameState::WaitingForOpponent,
             game_id: 0,
             moves: 0,
-            created_at: 0,
+            last_activity_at: 0,
             bump: 0,
         };
         assert_eq!(g.judge(), None);
@@ -205,5 +224,37 @@ mod tests {
         assert!(GameState::OWon.is_over());
         assert!(GameState::XWon.is_over());
         assert!(GameState::Draw.is_over());
+    }
+
+    /// 超时边界：差一秒不算、满一秒算、时钟回拨不误判。
+    #[test]
+    fn timeout_boundary() {
+        let t0 = 1_700_000_000;
+        assert!(!timeout_elapsed(t0, t0), "刚活动过不该判超时");
+        assert!(
+            !timeout_elapsed(t0 + TIMEOUT_SECS - 1, t0),
+            "差 1 秒不该判超时"
+        );
+        assert!(
+            timeout_elapsed(t0 + TIMEOUT_SECS, t0),
+            "刚好满 {} 秒应判超时",
+            TIMEOUT_SECS
+        );
+        assert!(
+            timeout_elapsed(t0 + TIMEOUT_SECS * 10, t0),
+            "远超时应判超时"
+        );
+        assert!(
+            !timeout_elapsed(t0 - 60, t0),
+            "时钟回拨时按未超时处理，宁可不判"
+        );
+    }
+
+    /// 加字段会让账户长度变化；这条测试守着「布局仍是 101 字节」，
+    /// 因为改了长度，链上老账户就无法反序列化了。
+    #[test]
+    fn last_activity_shares_bytes_with_created_at() {
+        assert_eq!(Game::INIT_SPACE, 93);
+        assert_eq!(8 + Game::INIT_SPACE, 101);
     }
 }

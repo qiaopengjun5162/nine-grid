@@ -23,6 +23,10 @@ pub enum NineGridError {
     InconsistentState,
     #[msg("对局还没结束，不能关闭账户")]
     GameInProgress,
+    #[msg("还没到超时时间，对方还有时间落子")]
+    TimeoutNotReached,
+    #[msg("轮到你落子，不能用超时判胜；不想下了请认输")]
+    OnlyOpponentCanClaimTimeout,
 }
 
 /// 规则层错误 → 链上错误码。与服务端 error.rs 的映射一一对应，

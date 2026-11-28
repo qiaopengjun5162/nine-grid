@@ -262,4 +262,147 @@ describe("nine-grid (on-chain)", () => {
       .signers([O])
       .rpc();
   });
+
+  it("认输：对手获胜，之后不能再落子，建局者还能关局退租金", async () => {
+    const game = await newStartedGame();
+    await play(game, O, 4);
+    await play(game, X, 0);
+
+    // O 认输 → X 获胜
+    await program.methods
+      .resign()
+      .accountsPartial({ game, player: O.publicKey })
+      .signers([O])
+      .rpc();
+    const after = await program.account.game.fetch(game);
+    assert.deepEqual(after.state, { xWon: {} }, "O 认输后应为 X 胜");
+    assert.equal(after.moves, 2, "认输不改变棋谱，只改结果");
+
+    // 终局冻结：认输之后也不能再落子
+    await expectError(play(game, X, 8), "GameAlreadyOver");
+
+    // 认输解决了「卡住就退不回租金」：终局后建局者可以关局
+    await program.methods
+      .closeGame()
+      .accountsPartial({ game, playerO: O.publicKey })
+      .signers([O])
+      .rpc();
+  });
+
+  it("认输的拒绝分支：非玩家、等人入座、已经终局", async () => {
+    // 1) 路人不能替别人认输
+    const playing = await newStartedGame();
+    const outsider = Keypair.generate();
+    await expectError(
+      program.methods
+        .resign()
+        .accountsPartial({ game: playing, player: outsider.publicKey })
+        .signers([outsider])
+        .rpc(),
+      "NotAPlayer",
+    );
+
+    // 2) 还没人入座就「认输」没有意义 —— 该用 close_game 撤回
+    const waiting = await createGame();
+    await expectError(
+      program.methods
+        .resign()
+        .accountsPartial({ game: waiting, player: O.publicKey })
+        .signers([O])
+        .rpc(),
+      "GameNotStarted",
+    );
+
+    // 3) 已经结束的局不能再结束一次
+    const over = await newStartedGame();
+    await program.methods
+      .resign()
+      .accountsPartial({ game: over, player: X.publicKey })
+      .signers([X])
+      .rpc();
+    await expectError(
+      program.methods
+        .resign()
+        .accountsPartial({ game: over, player: O.publicKey })
+        .signers([O])
+        .rpc(),
+      "GameAlreadyOver",
+    );
+  });
+
+  it("超时判负：没到时间不能判，轮到自己更不能判", async () => {
+    const game = await newStartedGame(); // O 先手
+
+    // 刚入座，谁都没资格判超时
+    await expectError(
+      program.methods
+        .claimTimeout()
+        .accountsPartial({ game, player: X.publicKey })
+        .signers([X])
+        .rpc(),
+      "TimeoutNotReached",
+    );
+
+    // O 是轮到落子的一方，不能替自己「申请超时胜利」
+    await expectError(
+      program.methods
+        .claimTimeout()
+        .accountsPartial({ game, player: O.publicKey })
+        .signers([O])
+        .rpc(),
+      "OnlyOpponentCanClaimTimeout",
+    );
+
+    // 路人也不行
+    const outsider = Keypair.generate();
+    await expectError(
+      program.methods
+        .claimTimeout()
+        .accountsPartial({ game, player: outsider.publicKey })
+        .signers([outsider])
+        .rpc(),
+      "NotAPlayer",
+    );
+
+    // 每落一手都会续期：X 落子后，轮到 O，此时被判超时的是 O
+    await play(game, O, 4);
+    await play(game, X, 0);
+    await expectError(
+      program.methods
+        .claimTimeout()
+        .accountsPartial({ game, player: O.publicKey })
+        .signers([O])
+        .rpc(),
+      "OnlyOpponentCanClaimTimeout",
+    );
+  });
+
+  it("最后活动时间随落子刷新（超时判定的依据）", async () => {
+    const game = await newStartedGame();
+    const joined = await program.account.game.fetch(game);
+    await play(game, O, 4);
+    const moved = await program.account.game.fetch(game);
+    assert.isAtLeast(
+      moved.lastActivityAt.toNumber(),
+      joined.lastActivityAt.toNumber(),
+      "落子后活动时间不应倒退",
+    );
+  });
+
+  // 成功路径需要真的等满 5 分钟。默认跳过，避免把 CI 拖成 6 分钟；
+  // 部署到 Devnet 后由 LIVE_TIMEOUT=1 单独跑一次，或手动在页面上验证。
+  (process.env.LIVE_TIMEOUT ? it : it.skip)(
+    "超时判负的成功路径（需真实等待 5 分钟）",
+    async () => {
+      const game = await newStartedGame(); // O 先手，一直不动
+      await new Promise((r) => setTimeout(r, 305_000));
+      await program.methods
+        .claimTimeout()
+        .accountsPartial({ game, player: X.publicKey })
+        .signers([X])
+        .rpc();
+      const s = await program.account.game.fetch(game);
+      assert.deepEqual(s.state, { xWon: {} }, "O 超时未落子，应判 X 胜");
+    },
+  );
 });

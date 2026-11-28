@@ -8,12 +8,48 @@
   },
   "instructions": [
     {
+      "name": "claim_timeout",
+      "docs": [
+        "超时判负：轮到对方落子，但对方超过 [`TIMEOUT_SECS`] 没有任何动作，判自己胜。",
+        "",
+        "只能由**等着的那一方**发起：轮到自己时不能拿超时判胜（那是耍赖），",
+        "想结束请用 `resign`。判罚只依据链上时钟与账户里的最后活动时间，",
+        "不依赖任何链下服务 —— 对手关掉浏览器也躲不过。"
+      ],
+      "discriminator": [
+        130,
+        234,
+        45,
+        53,
+        120,
+        90,
+        86,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "player",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "close_game",
       "docs": [
         "收尾：关掉账户，把租金退还给创建者。",
         "",
         "只有创建者能关自己付过租金的棋局。注意这一步会让该局棋彻底消失，",
-        "想留作「链上棋谱」的话就别调它。"
+        "想留作「链上棋谱」的话就别调它。",
+        "",
+        "**对局中不许关**（`state == InProgress`）。账户就是这盘棋唯一的记录，",
+        "允许单方关闭等于允许「快输了就掀桌」—— 对手的落子、胜负、棋谱会一起消失，",
+        "而且没有任何反制手段。等待入座允许关（建错了能撤回），终局后允许关",
+        "（退租金），只锁住双方都在局中的那段时间。"
       ],
       "discriminator": [
         237,
@@ -164,6 +200,40 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "resign",
+      "docs": [
+        "认输：放弃这一局，对手获胜。",
+        "",
+        "这是**协议动作**，不是棋盘规则 —— `nine_grid_core` 里没有也不该有「认输」，",
+        "因为它不改变任何一格棋子。所以这里直接改账户状态，不走 `Game::apply`。",
+        "",
+        "为什么必须有它：A-01 之后「对局中谁都不能关账户」，一旦不想下了，",
+        "这局就永久卡在 `InProgress`，双方租金都拿不回来。",
+        "认输 → 终局 → 建局者可以关局退租金，闭环才完整。"
+      ],
+      "discriminator": [
+        177,
+        177,
+        153,
+        96,
+        88,
+        149,
+        206,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true
+        },
+        {
+          "name": "player",
+          "signer": true
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -220,6 +290,32 @@
         183,
         38
       ]
+    },
+    {
+      "name": "PlayerResigned",
+      "discriminator": [
+        162,
+        220,
+        182,
+        106,
+        5,
+        134,
+        183,
+        173
+      ]
+    },
+    {
+      "name": "TimeoutClaimed",
+      "discriminator": [
+        144,
+        121,
+        253,
+        197,
+        88,
+        115,
+        135,
+        218
+      ]
     }
   ],
   "errors": [
@@ -267,6 +363,21 @@
       "code": 6008,
       "name": "InconsistentState",
       "msg": "对局数据自相矛盾"
+    },
+    {
+      "code": 6009,
+      "name": "GameInProgress",
+      "msg": "对局还没结束，不能关闭账户"
+    },
+    {
+      "code": 6010,
+      "name": "TimeoutNotReached",
+      "msg": "还没到超时时间，对方还有时间落子"
+    },
+    {
+      "code": 6011,
+      "name": "OnlyOpponentCanClaimTimeout",
+      "msg": "轮到你落子，不能用超时判胜；不想下了请认输"
     }
   ],
   "types": [
@@ -340,9 +451,14 @@
             "type": "u8"
           },
           {
-            "name": "created_at",
+            "name": "last_activity_at",
             "docs": [
-              "创建时间（链上时钟，秒）"
+              "最后一次活动时间（链上时钟，秒）：建局、入座、落子都会刷新。",
+              "",
+              "这个字段原本叫 `created_at`（只在建局时写一次）。为了在不改账户布局、",
+              "不迁移老账户的前提下支持超时判定，改成「最后活动时间」语义 ——",
+              "字节位置和类型都没变，老账户仍能正确反序列化（值是创建时间，",
+              "对超时而言只会更早触发，不会漏判）。"
             ],
             "type": "i64"
           },
@@ -455,6 +571,49 @@
           {
             "name": "player_x",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerResigned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TimeoutClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "game",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimer",
+            "type": "pubkey"
+          },
+          {
+            "name": "idle_secs",
+            "docs": [
+              "对方实际多久没动（秒），用于前端/浏览器核对判罚是否合理"
+            ],
+            "type": "i64"
           }
         ]
       }
